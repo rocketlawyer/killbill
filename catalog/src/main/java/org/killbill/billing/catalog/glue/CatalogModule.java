@@ -86,6 +86,7 @@ public class CatalogModule extends KillBillModule {
 
     @Override
     protected void configure() {
+        installCatalogPluginApi();
         installConfig();
         installCatalogDao();
         installCatalog();
