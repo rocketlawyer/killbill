@@ -20,7 +20,6 @@ package org.killbill.billing.catalog;
 
 import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.Set;
 
 import javax.inject.Named;
 
@@ -31,6 +30,7 @@ import org.killbill.billing.catalog.api.CatalogService;
 import org.killbill.billing.catalog.api.StaticCatalog;
 import org.killbill.billing.catalog.caching.CatalogCache;
 import org.killbill.billing.catalog.glue.CatalogModule;
+import org.killbill.billing.catalog.override.PriceOverride;
 import org.killbill.billing.catalog.plugin.api.CatalogPluginApi;
 import org.killbill.billing.catalog.plugin.api.StandalonePluginCatalog;
 import org.killbill.billing.catalog.plugin.api.VersionedPluginCatalog;
@@ -44,6 +44,7 @@ import org.killbill.billing.tenant.api.TenantInternalApi.CacheInvalidationCallba
 import org.killbill.billing.tenant.api.TenantKV.TenantKey;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.config.CatalogConfig;
+import org.killbill.clock.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,12 +59,14 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
     private boolean isInitialized;
 
     private final TenantInternalApi tenantInternalApi;
+    private final PriceOverride priceOverride;
 
     private final CatalogCache catalogCache;
     private final CacheInvalidationCallback cacheInvalidationCallback;
 
     private final InternalCallContextFactory contextFactory;
     private final CatalogPluginApi pluginCatalog;
+    private final Clock clock;
 
     @Inject
     public DefaultCatalogService(final CatalogConfig config,
@@ -71,31 +74,34 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
                                  final CatalogCache catalogCache,
                                  @Named(CatalogModule.CATALOG_INVALIDATION_CALLBACK) final CacheInvalidationCallback cacheInvalidationCallback,
                                  final InternalCallContextFactory contextFactory,
-                                 final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry
+                                 final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry,
+                                 final PriceOverride priceOverride,
+                                 final Clock clock
                                 ) {
+        super();
         this.config = config;
         this.catalogCache = catalogCache;
         this.cacheInvalidationCallback = cacheInvalidationCallback;
         this.tenantInternalApi = tenantInternalApi;
+        this.priceOverride = priceOverride;
         this.isInitialized = false;
         this.contextFactory = contextFactory;
-
+        this.clock = clock;
         this.pluginCatalog = selectCatalogPlugin(pluginRegistry);
     }
 
     private CatalogPluginApi selectCatalogPlugin(final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry) {
-        Iterator<String> nameIterator = pluginRegistry.getAllServices().iterator();
-        if(nameIterator.hasNext()){
+        final Iterator<String> nameIterator = pluginRegistry.getAllServices().iterator();
+        if (nameIterator.hasNext()) {
             return pluginRegistry.getServiceForName(nameIterator.next());
-        }
-        else {
+        } else {
             return null;
         }
     }
 
     @LifecycleHandlerType(LifecycleLevel.LOAD_CATALOG)
     public synchronized void loadCatalog() throws ServiceException {
-        if (!isInitialized && pluginCatalog == null) {
+        if (!isInitialized) {
             try {
                 // In multi-tenant mode, the property is not required
                 if (config.getCatalogURI() != null && !config.getCatalogURI().isEmpty()) {
@@ -103,7 +109,7 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
                     log.info("Successfully loaded the default catalog " + config.getCatalogURI());
                 }
                 isInitialized = true;
-            } catch (Exception e) {
+            } catch (final Exception e) {
                 throw new ServiceException(e);
             }
         }
@@ -111,43 +117,55 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
 
     @LifecycleHandlerType(LifecycleLevel.INIT_SERVICE)
     public synchronized void initialize() throws ServiceException {
-        if(pluginCatalog == null){
-            tenantInternalApi.initializeCacheInvalidationCallback(TenantKey.CATALOG, cacheInvalidationCallback);
-        }
+        tenantInternalApi.initializeCacheInvalidationCallback(TenantKey.CATALOG, cacheInvalidationCallback);
     }
 
-        @Override
+    @Override
     public String getName() {
         return CATALOG_SERVICE_NAME;
     }
 
     @Override
     public Catalog getFullCatalog(final InternalTenantContext context) throws CatalogApiException {
-        if(pluginCatalog == null)
-            return getCatalog(context);
-        else {
-            //TODO Map Plugin Catalog to Catalog.
-            VersionedPluginCatalog vPluginCatalog = pluginCatalog.getVersionedPluginCatalog(new LinkedList<PluginProperty>(),
-                                                                    contextFactory.createTenantContext(context));
-            Iterable<StandalonePluginCatalog> standalonePluginCatalogs = vPluginCatalog.getStandalonePluginCatalogs();
-
-            for (StandalonePluginCatalog standalonePluginCatalog: standalonePluginCatalogs){
-            }
-            return null;
-        }
+        return getCatalog(context);
     }
 
     @Override
     public StaticCatalog getCurrentCatalog(final InternalTenantContext context) throws CatalogApiException {
-        if(pluginCatalog == null)
-            return getCatalog(context);
-        else {
-            //TODO Map Plugin Catalog to StaticCatalog.
-            return null;
-        }
+        return getCatalog(context);
     }
 
     private VersionedCatalog getCatalog(final InternalTenantContext context) throws CatalogApiException {
-        return catalogCache.getCatalog(context);
+        if (pluginCatalog == null) {
+            return catalogCache.getCatalog(context);
+        } else {
+            //TODO Map Plugin Catalog to Catalog.
+            final VersionedPluginCatalog vPluginCatalog = pluginCatalog.getVersionedPluginCatalog(
+                    new LinkedList<PluginProperty>(),
+                    contextFactory.createTenantContext(context));
+            final Iterable<StandalonePluginCatalog> standalonePluginCatalogs = vPluginCatalog.getStandalonePluginCatalogs();
+            final VersionedCatalog vc;
+            vc = new VersionedCatalog(clock);
+
+            DefaultCatalogMapping.map(
+                    standalonePluginCatalogs,
+                    new DefaultCatalogMapping.Mapper<StandalonePluginCatalog, StandaloneCatalogWithPriceOverride>() {
+                        @Override
+                        public StandaloneCatalogWithPriceOverride apply(final StandalonePluginCatalog standalonePluginCatalog) {
+                            try {
+                                final StandaloneCatalog sc =
+                                        DefaultCatalogMapping.standalonePluginCatalogToStandalongCatalog(standalonePluginCatalog, vPluginCatalog, vc);
+                                final StandaloneCatalogWithPriceOverride result =
+                                        new StandaloneCatalogWithPriceOverride(sc, priceOverride, context.getTenantRecordId(), contextFactory);
+                                vc.add(result);
+                            } catch (final CatalogApiException e) {
+                                e.printStackTrace();
+                            }
+                            return null;
+                        }
+                    });
+            return vc;
+        }
     }
+
 }
