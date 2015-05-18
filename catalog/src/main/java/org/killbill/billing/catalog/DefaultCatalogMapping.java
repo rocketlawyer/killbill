@@ -79,7 +79,7 @@ public class DefaultCatalogMapping {
     public static DefaultProduct[] productsToDefaultProducts(final Iterable<Product> products) {
         final Product[] prodArray = Iterables.toArray(products, Product.class);
         final DefaultProduct[] result = new DefaultProduct[prodArray.length];
-        for(int i = 0; i < result.length; i++){
+        for (int i = 0; i < result.length; i++) {
             result[i] = productToDefaultProduct(prodArray[i]);
         }
         return result;
