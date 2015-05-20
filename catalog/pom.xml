@@ -51,6 +51,11 @@
         </dependency>
         <dependency>
             <groupId>org.kill-bill.billing</groupId>
+            <artifactId>killbill-platform-osgi-api</artifactId>
+            <version>0.3-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>org.kill-bill.billing</groupId>
             <artifactId>killbill-api</artifactId>
         </dependency>
         <dependency>
