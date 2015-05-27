@@ -26,9 +26,11 @@ import com.google.inject.Inject;
 import com.google.inject.Provider;
 
 
+//TODO: Make sure this is implemented fully.
 public class DefaultCatalogProviderPluginRegistryProvider implements Provider<OSGIServiceRegistration<CatalogPluginApi>> {
     @Inject
-    public DefaultCatalogProviderPluginRegistryProvider(){
+    public DefaultCatalogProviderPluginRegistryProvider() {
+        super();
     }
 
     @Override

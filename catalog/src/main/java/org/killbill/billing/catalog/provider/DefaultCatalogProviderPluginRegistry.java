@@ -24,6 +24,7 @@ import org.killbill.billing.osgi.api.OSGIServiceRegistration;
 
 import java.util.Set;
 
+//TODO: Implement DefaultCatalogProviderPluginRegistry
 public class DefaultCatalogProviderPluginRegistry implements OSGIServiceRegistration<CatalogPluginApi> {
     @Override
     public void registerService(OSGIServiceDescriptor osgiServiceDescriptor, CatalogPluginApi catalogPluginApi) {
