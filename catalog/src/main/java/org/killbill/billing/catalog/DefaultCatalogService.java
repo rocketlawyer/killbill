@@ -59,35 +59,22 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
     private boolean isInitialized;
 
     private final TenantInternalApi tenantInternalApi;
-    private final PriceOverride priceOverride;
 
     private final CatalogCache catalogCache;
     private final CacheInvalidationCallback cacheInvalidationCallback;
-
-    private final InternalCallContextFactory contextFactory;
-    private final CatalogPluginApi pluginCatalog;
-    private final Clock clock;
 
     @Inject
     public DefaultCatalogService(final CatalogConfig config,
                                  final TenantInternalApi tenantInternalApi,
                                  final CatalogCache catalogCache,
-                                 @Named(CatalogModule.CATALOG_INVALIDATION_CALLBACK) final CacheInvalidationCallback cacheInvalidationCallback,
-                                 final InternalCallContextFactory contextFactory,
-                                 final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry,
-                                 final PriceOverride priceOverride,
-                                 final Clock clock
+                                 @Named(CatalogModule.CATALOG_INVALIDATION_CALLBACK) final CacheInvalidationCallback cacheInvalidationCallback
                                 ) {
         super();
         this.config = config;
         this.catalogCache = catalogCache;
         this.cacheInvalidationCallback = cacheInvalidationCallback;
         this.tenantInternalApi = tenantInternalApi;
-        this.priceOverride = priceOverride;
         this.isInitialized = false;
-        this.contextFactory = contextFactory;
-        this.clock = clock;
-        this.pluginCatalog = selectCatalogPlugin(pluginRegistry);
     }
 
     private CatalogPluginApi selectCatalogPlugin(final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry) {
@@ -136,36 +123,7 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
     }
 
     private VersionedCatalog getCatalog(final InternalTenantContext context) throws CatalogApiException {
-        if (pluginCatalog == null) {
-            return catalogCache.getCatalog(context);
-        } else {
-            //TODO Map Plugin Catalog to Catalog.
-            final VersionedPluginCatalog vPluginCatalog = pluginCatalog.getVersionedPluginCatalog(
-                    new LinkedList<PluginProperty>(),
-                    contextFactory.createTenantContext(context));
-            final Iterable<StandalonePluginCatalog> standalonePluginCatalogs = vPluginCatalog.getStandalonePluginCatalogs();
-            final VersionedCatalog vc;
-            vc = new VersionedCatalog(clock);
-
-            DefaultCatalogMapping.map(
-                    standalonePluginCatalogs,
-                    new DefaultCatalogMapping.Mapper<StandalonePluginCatalog, StandaloneCatalogWithPriceOverride>() {
-                        @Override
-                        public StandaloneCatalogWithPriceOverride apply(final StandalonePluginCatalog standalonePluginCatalog) {
-                            try {
-                                final StandaloneCatalog sc =
-                                        DefaultCatalogMapping.standalonePluginCatalogToStandalongCatalog(standalonePluginCatalog, vPluginCatalog, vc);
-                                final StandaloneCatalogWithPriceOverride result =
-                                        new StandaloneCatalogWithPriceOverride(sc, priceOverride, context.getTenantRecordId(), contextFactory);
-                                vc.add(result);
-                            } catch (final CatalogApiException e) {
-                                e.printStackTrace();
-                            }
-                            return null;
-                        }
-                    });
-            return vc;
-        }
+        return catalogCache.getCatalog(context);
     }
 
 }
