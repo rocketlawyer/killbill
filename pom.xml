@@ -56,39 +56,7 @@
         <system>Github</system>
         <url>http://github.com/killbill/killbill</url>
     </issueManagement>
-    <distributionManagement>
-        <repository>
-            <id>releases</id>
-            <url>http://f1tst-linbld100/nexus/content/repositories/releases</url>
-        </repository>
-        <snapshotRepository>
-            <id>snapshots</id>
-            <url>http://f1tst-linbld100/nexus/content/repositories/snapshots</url>
-        </snapshotRepository>
-    </distributionManagement>
     <properties>
         <killbill.version>${project.version}</killbill.version>
     </properties>
-    <repositories>
-        <repository>
-            <id>Sonatype Releases</id>
-            <url>http://oss.sonatype.org/content/repositories/releases</url>
-        </repository>
-        <repository>
-            <id>Sonatype Snapshots</id>
-            <url>http://oss.sonatype.org/content/repositories/snapshots</url>
-        </repository>
-        <repository>
-            <id>rocketlawyer snapshot</id>
-            <url>http://f1tst-linbld100/nexus/content/repositories/snapshots</url>
-        </repository>
-        <repository>
-            <id>rocketlawyer releases</id>
-            <url>http://f1tst-linbld100/nexus/content/repositories/releases</url>
-        </repository>
-        <repository>
-            <id>thirdparty</id>
-            <url>http://f1tst-linbld100/nexus/content/repositories/thirdparty</url>
-        </repository>
-    </repositories>
 </project>
