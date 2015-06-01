@@ -41,7 +41,7 @@ and  t.is_active
 
 markTenantKeyAsDeleted() ::= <<
 update <tableName()> t
-set t.is_active = 0
+set t.is_active = false
 where t.id = :id
 <AND_CHECK_TENANT("t.")>
 ;
