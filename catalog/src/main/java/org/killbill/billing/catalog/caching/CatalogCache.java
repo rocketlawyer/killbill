@@ -17,16 +17,20 @@
 
 package org.killbill.billing.catalog.caching;
 
+import org.joda.time.DateTime;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.VersionedCatalog;
+import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.catalog.api.CatalogApiException;
+import org.killbill.billing.catalog.api.StaticCatalog;
 
 public interface CatalogCache {
 
     public void loadDefaultCatalog(final String url) throws CatalogApiException;
 
-    public VersionedCatalog getCatalog(InternalTenantContext tenantContext) throws CatalogApiException;
+    public Catalog getCatalog(InternalTenantContext tenantContext) throws CatalogApiException;
 
     public void clearCatalog(InternalTenantContext tenantContext);
 
+    StaticCatalog getStaticCatalog(InternalTenantContext context, DateTime now) throws CatalogApiException;
 }

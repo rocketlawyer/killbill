@@ -49,6 +49,7 @@ import org.killbill.billing.catalog.api.PriceList;
 import org.killbill.billing.catalog.api.Product;
 import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.catalog.api.StaticCatalog;
+import org.killbill.billing.catalog.plugin.api.StandalonePluginCatalog;
 import org.killbill.billing.catalog.rules.PlanRules;
 import org.killbill.xmlloader.ValidatingConfig;
 import org.killbill.xmlloader.ValidationErrors;
@@ -94,6 +95,7 @@ public class StandaloneCatalog extends ValidatingConfig<StandaloneCatalog> imple
 
     public StandaloneCatalog() {
     }
+
 
     protected StandaloneCatalog(final Date effectiveDate) {
         this.effectiveDate = effectiveDate;

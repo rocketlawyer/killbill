@@ -43,6 +43,7 @@ import org.testng.annotations.Test;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.CharStreams;
 import com.google.common.io.Resources;
+import com.sun.tools.javac.jvm.ClassFile.Version;
 
 public class TestEhCacheCatalogCache extends CatalogTestSuiteNoDB {
 
@@ -79,8 +80,9 @@ public class TestEhCacheCatalogCache extends CatalogTestSuiteNoDB {
     @Test(groups = "fast")
     public void testDefaultCatalog() throws CatalogApiException {
         catalogCache.loadDefaultCatalog(Resources.getResource("SpyCarBasic.xml").toExternalForm());
+        final Catalog catalog = catalogCache.getCatalog(internalCallContext);
 
-        final VersionedCatalog result = catalogCache.getCatalog(internalCallContext);
+        final VersionedCatalog result = (VersionedCatalog) catalog;
         Assert.assertNotNull(result);
         final DefaultProduct[] products = result.getProducts(clock.getUTCNow());
         Assert.assertEquals(products.length, 3);
@@ -88,9 +90,9 @@ public class TestEhCacheCatalogCache extends CatalogTestSuiteNoDB {
         // Verify the lookup with other contexts
         final VersionedCatalog resultForMultiTenantContext = new VersionedCatalog(result, multiTenantContext);
         Assert.assertEquals(catalogCache.getCatalog(multiTenantContext).getCatalogName(), resultForMultiTenantContext.getCatalogName());
-        Assert.assertEquals(catalogCache.getCatalog(multiTenantContext).getVersions().size(), resultForMultiTenantContext.getVersions().size());
-        for (int i = 0; i < catalogCache.getCatalog(multiTenantContext).getVersions().size(); i++) {
-            Assert.assertEquals(catalogCache.getCatalog(multiTenantContext).getVersions().get(i).getTenantRecordId(), resultForMultiTenantContext.getVersions().get(i).getTenantRecordId());
+        Assert.assertEquals(((VersionedCatalog) catalogCache.getCatalog(multiTenantContext)).getVersions().size(), resultForMultiTenantContext.getVersions().size());
+        for (int i = 0; i < ((VersionedCatalog) catalogCache.getCatalog(multiTenantContext)).getVersions().size(); i++) {
+            Assert.assertEquals(((VersionedCatalog) catalogCache.getCatalog(multiTenantContext)).getVersions().get(i).getTenantRecordId(), resultForMultiTenantContext.getVersions().get(i).getTenantRecordId());
         }
     }
 
@@ -131,14 +133,14 @@ public class TestEhCacheCatalogCache extends CatalogTestSuiteNoDB {
         });
 
         // Verify the lookup for a non-cached tenant. No system config is set yet but EhCacheCatalogCache returns a default empty one
-        VersionedCatalog differentResult = catalogCache.getCatalog(differentMultiTenantContext);
+        VersionedCatalog differentResult = (VersionedCatalog) catalogCache.getCatalog(differentMultiTenantContext);
         Assert.assertNotNull(differentResult);
         Assert.assertEquals(differentResult.getCatalogName(), "EmptyCatalog");
 
         // Make sure the cache loader isn't invoked, see https://github.com/killbill/killbill/issues/300
         shouldThrow.set(true);
 
-        differentResult = catalogCache.getCatalog(differentMultiTenantContext);
+        differentResult = (VersionedCatalog) catalogCache.getCatalog(differentMultiTenantContext);
         Assert.assertNotNull(differentResult);
         Assert.assertEquals(differentResult.getCatalogName(), "EmptyCatalog");
 
@@ -148,13 +150,13 @@ public class TestEhCacheCatalogCache extends CatalogTestSuiteNoDB {
         catalogCache.loadDefaultCatalog(Resources.getResource("SpyCarBasic.xml").toExternalForm());
 
         // Verify the lookup for this tenant
-        final VersionedCatalog result = catalogCache.getCatalog(multiTenantContext);
+        final VersionedCatalog result = (VersionedCatalog) catalogCache.getCatalog(multiTenantContext);
         Assert.assertNotNull(result);
         final DefaultProduct[] products = result.getProducts(clock.getUTCNow());
         Assert.assertEquals(products.length, 6);
 
         // Verify the lookup for another tenant
-        final VersionedCatalog otherResult = catalogCache.getCatalog(otherMultiTenantContext);
+        final VersionedCatalog otherResult = (VersionedCatalog) catalogCache.getCatalog(otherMultiTenantContext);
         Assert.assertNotNull(otherResult);
         final DefaultProduct[] otherProducts = otherResult.getProducts(clock.getUTCNow());
         Assert.assertEquals(otherProducts.length, 3);
@@ -162,7 +164,7 @@ public class TestEhCacheCatalogCache extends CatalogTestSuiteNoDB {
         shouldThrow.set(true);
 
         // Verify the lookup for this tenant
-        final VersionedCatalog result2 = catalogCache.getCatalog(multiTenantContext);
+        final VersionedCatalog result2 = (VersionedCatalog) catalogCache.getCatalog(multiTenantContext);
         Assert.assertEquals(result2, result);
 
         // Verify the lookup with another context for the same tenant

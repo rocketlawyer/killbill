@@ -23,6 +23,7 @@ import java.util.LinkedList;
 
 import javax.inject.Named;
 
+import org.joda.time.DateTime;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.catalog.api.CatalogApiException;
@@ -114,16 +115,16 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
 
     @Override
     public Catalog getFullCatalog(final InternalTenantContext context) throws CatalogApiException {
-        return getCatalog(context);
+        return catalogCache.getCatalog(context);
     }
 
     @Override
     public StaticCatalog getCurrentCatalog(final InternalTenantContext context) throws CatalogApiException {
-        return getCatalog(context);
+        return catalogCache.getStaticCatalog(context, DateTime.now());
     }
 
-    private VersionedCatalog getCatalog(final InternalTenantContext context) throws CatalogApiException {
-        return catalogCache.getCatalog(context);
-    }
+//    private VersionedCatalog getCatalog(final InternalTenantContext context) throws CatalogApiException {
+//        return catalogCache.getCatalog(context);
+//    }
 
 }

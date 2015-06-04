@@ -17,26 +17,50 @@
 
 package org.killbill.billing.catalog.caching;
 
+import java.util.LinkedList;
 import java.util.List;
 
 import javax.inject.Inject;
 
+import org.joda.time.DateTime;
 import org.killbill.billing.ErrorCode;
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.VersionedCatalog;
+import org.killbill.billing.catalog.api.BillingActionPolicy;
+import org.killbill.billing.catalog.api.BillingAlignment;
+import org.killbill.billing.catalog.api.BillingPeriod;
+import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.catalog.api.CatalogApiException;
+import org.killbill.billing.catalog.api.Currency;
+import org.killbill.billing.catalog.api.Plan;
+import org.killbill.billing.catalog.api.PlanAlignmentChange;
+import org.killbill.billing.catalog.api.PlanAlignmentCreate;
+import org.killbill.billing.catalog.api.PlanChangeResult;
+import org.killbill.billing.catalog.api.PlanPhase;
+import org.killbill.billing.catalog.api.PlanPhasePriceOverridesWithCallContext;
+import org.killbill.billing.catalog.api.PlanPhaseSpecifier;
+import org.killbill.billing.catalog.api.PlanSpecifier;
+import org.killbill.billing.catalog.api.PriceList;
+import org.killbill.billing.catalog.api.Product;
+import org.killbill.billing.catalog.api.StaticCatalog;
 import org.killbill.billing.catalog.io.VersionedCatalogLoader;
+import org.killbill.billing.catalog.plugin.api.CatalogPluginApi;
+import org.killbill.billing.catalog.plugin.api.VersionedPluginCatalog;
+import org.killbill.billing.osgi.api.OSGIServiceRegistration;
+import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.util.cache.Cachable.CacheType;
 import org.killbill.billing.util.cache.CacheController;
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
 import org.killbill.billing.util.cache.CacheLoaderArgument;
 import org.killbill.billing.util.cache.TenantCatalogCacheLoader.LoaderCallback;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.clock.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
+import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 public class EhCacheCatalogCache implements CatalogCache {
 
@@ -45,11 +69,23 @@ public class EhCacheCatalogCache implements CatalogCache {
     private final CacheController cacheController;
     private final VersionedCatalogLoader loader;
     private final CacheLoaderArgument cacheLoaderArgument;
+    private final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry;
+    private final InternalCallContextFactory contextFactory;
+    private final Clock clock;
 
     private VersionedCatalog defaultCatalog;
 
     @Inject
-    public EhCacheCatalogCache(final CacheControllerDispatcher cacheControllerDispatcher, final VersionedCatalogLoader loader) {
+    public EhCacheCatalogCache(
+            final CacheControllerDispatcher cacheControllerDispatcher,
+            final VersionedCatalogLoader loader,
+            final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry,
+            final InternalCallContextFactory contextFactory,
+            final Clock clock
+                              ) {
+        this.pluginRegistry = pluginRegistry;
+        this.contextFactory = contextFactory;
+        this.clock = clock;
         this.cacheController = cacheControllerDispatcher.getCacheController(CacheType.TENANT_CATALOG);
         this.loader = loader;
         this.cacheLoaderArgument = initializeCacheLoaderArgument(this);
@@ -64,7 +100,13 @@ public class EhCacheCatalogCache implements CatalogCache {
     }
 
     @Override
-    public VersionedCatalog getCatalog(final InternalTenantContext tenantContext) throws CatalogApiException {
+    public Catalog getCatalog(final InternalTenantContext tenantContext) throws CatalogApiException {
+
+        final VersionedPluginCatalog pluginCatalog = getPluginCatalog(tenantContext);
+        if(pluginCatalog != null){
+            return new PluginCatalogAdapter(pluginCatalog);
+        }
+
         if (tenantContext.getTenantRecordId() == InternalCallContextFactory.INTERNAL_TENANT_RECORD_ID) {
             return defaultCatalog;
         }
@@ -85,11 +127,38 @@ public class EhCacheCatalogCache implements CatalogCache {
     }
 
     @Override
+    public StaticCatalog getStaticCatalog(final InternalTenantContext context, final DateTime now) throws CatalogApiException {
+        final Catalog catalog = getCatalog(context);
+        if(catalog.getClass().equals(VersionedCatalog.class)){
+            return (VersionedCatalog) catalog;
+        }
+        else if(catalog.getClass().equals(PluginCatalogAdapter.class)){
+            return new PluginStaticCatalogAdapter((PluginCatalogAdapter) catalog, now);
+        }
+        return null;
+    }
+
+    private VersionedPluginCatalog getPluginCatalog(final InternalTenantContext context) {
+        Iterable<String> services = pluginRegistry.getAllServices();
+        if(services != null){
+            for (final String name : services ) {
+                VersionedPluginCatalog catalog = pluginRegistry.getServiceForName(name).getVersionedPluginCatalog(new LinkedList<PluginProperty>(),
+                                                                                           contextFactory.createTenantContext(context));
+                if (catalog != null) {
+                    return catalog;
+                }
+            }
+        }
+        return null;
+    }
+
+    @Override
     public void clearCatalog(final InternalTenantContext tenantContext) {
         if (tenantContext.getTenantRecordId() != InternalCallContextFactory.INTERNAL_TENANT_RECORD_ID) {
             cacheController.remove(tenantContext.getTenantRecordId());
         }
     }
+
 
     //
     // Build the LoaderCallback that is required to build the catalog from the xml from a module that knows
