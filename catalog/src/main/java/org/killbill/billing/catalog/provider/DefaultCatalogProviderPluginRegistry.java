@@ -22,32 +22,47 @@ import org.killbill.billing.catalog.plugin.api.CatalogPluginApi;
 import org.killbill.billing.osgi.api.OSGIServiceDescriptor;
 import org.killbill.billing.osgi.api.OSGIServiceRegistration;
 
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
-//TODO: Implement DefaultCatalogProviderPluginRegistry
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class DefaultCatalogProviderPluginRegistry implements OSGIServiceRegistration<CatalogPluginApi> {
+    private final static Logger log = LoggerFactory.getLogger(DefaultCatalogProviderPluginRegistry.class);
+
+    private final Map<String, CatalogPluginApi> pluginsByName = new ConcurrentHashMap<String, CatalogPluginApi>();
+
     @Override
-    public void registerService(OSGIServiceDescriptor osgiServiceDescriptor, CatalogPluginApi catalogPluginApi) {
+    public void registerService(OSGIServiceDescriptor desc, CatalogPluginApi service) {
+        log.info("DefaultCatalogProviderPluginRegistry registering service " + desc.getRegistrationName());
+        pluginsByName.put(desc.getRegistrationName(), service);
+    }
+
+    @Override
+    public void unregisterService(String serviceName) {
+        log.info("DefaultCatalogProviderPluginRegistry unregistering service " + serviceName);
+        pluginsByName.remove(serviceName);
 
     }
 
     @Override
-    public void unregisterService(String s) {
-
-    }
-
-    @Override
-    public CatalogPluginApi getServiceForName(String s) {
-        return null;
+    public CatalogPluginApi getServiceForName(String name) {
+        if (name == null) {
+            throw new IllegalArgumentException("Null invoice plugin API name");
+        }
+        final CatalogPluginApi plugin = pluginsByName.get(name);
+        return plugin;
     }
 
     @Override
     public Set<String> getAllServices() {
-        return null;
+        return pluginsByName.keySet();
     }
 
     @Override
     public Class<CatalogPluginApi> getServiceType() {
-        return null;
+        return CatalogPluginApi.class;
     }
 }
