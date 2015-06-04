@@ -27,22 +27,8 @@ import org.killbill.billing.ErrorCode;
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.VersionedCatalog;
-import org.killbill.billing.catalog.api.BillingActionPolicy;
-import org.killbill.billing.catalog.api.BillingAlignment;
-import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.catalog.api.CatalogApiException;
-import org.killbill.billing.catalog.api.Currency;
-import org.killbill.billing.catalog.api.Plan;
-import org.killbill.billing.catalog.api.PlanAlignmentChange;
-import org.killbill.billing.catalog.api.PlanAlignmentCreate;
-import org.killbill.billing.catalog.api.PlanChangeResult;
-import org.killbill.billing.catalog.api.PlanPhase;
-import org.killbill.billing.catalog.api.PlanPhasePriceOverridesWithCallContext;
-import org.killbill.billing.catalog.api.PlanPhaseSpecifier;
-import org.killbill.billing.catalog.api.PlanSpecifier;
-import org.killbill.billing.catalog.api.PriceList;
-import org.killbill.billing.catalog.api.Product;
 import org.killbill.billing.catalog.api.StaticCatalog;
 import org.killbill.billing.catalog.io.VersionedCatalogLoader;
 import org.killbill.billing.catalog.plugin.api.CatalogPluginApi;
@@ -60,7 +46,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.annotations.VisibleForTesting;
-import sun.reflect.generics.reflectiveObjects.NotImplementedException;
 
 public class EhCacheCatalogCache implements CatalogCache {
 
@@ -163,7 +148,7 @@ public class EhCacheCatalogCache implements CatalogCache {
     //
     // Build the LoaderCallback that is required to build the catalog from the xml from a module that knows
     // nothing about catalog.
-    //
+    // /
     // This is a contract between the TenantCatalogCacheLoader and the EhCacheCatalogCache
     private CacheLoaderArgument initializeCacheLoaderArgument(final EhCacheCatalogCache parentCache) {
         final LoaderCallback loaderCallback = new LoaderCallback() {
