@@ -33,6 +33,8 @@ import org.killbill.billing.catalog.io.CatalogLoader;
 import org.killbill.billing.catalog.io.VersionedCatalogLoader;
 import org.killbill.billing.catalog.override.DefaultPriceOverride;
 import org.killbill.billing.catalog.override.PriceOverride;
+import org.killbill.billing.catalog.plugin.api.CatalogPluginApi;
+import org.killbill.billing.osgi.api.OSGIServiceRegistration;
 import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.tenant.api.TenantInternalApi.CacheInvalidationCallback;
 import org.killbill.billing.util.config.CatalogConfig;
@@ -40,6 +42,7 @@ import org.killbill.billing.util.glue.KillBillModule;
 import org.skife.config.ConfigurationObjectFactory;
 
 import com.google.inject.name.Names;
+import com.google.inject.TypeLiteral;
 
 public class CatalogModule extends KillBillModule {
 
@@ -75,10 +78,15 @@ public class CatalogModule extends KillBillModule {
         bind(OverriddenPlanCache.class).to(EhCacheOverriddenPlanCache.class).asEagerSingleton();
     }
 
+    protected void installCatalogPluginApi() {
+        bind(new TypeLiteral<OSGIServiceRegistration<CatalogPluginApi>>() {}).toProvider(DefaultCatalogProviderPluginRegistryProvider.class).asEagerSingleton();
+    }
+
 
 
     @Override
     protected void configure() {
+        installCatalogPluginApi();
         installConfig();
         installCatalogDao();
         installCatalog();

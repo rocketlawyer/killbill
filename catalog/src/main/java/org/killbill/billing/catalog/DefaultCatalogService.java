@@ -18,6 +18,9 @@
 
 package org.killbill.billing.catalog;
 
+import java.util.Iterator;
+import java.util.LinkedList;
+
 import javax.inject.Named;
 
 import org.killbill.billing.callcontext.InternalTenantContext;
@@ -26,15 +29,22 @@ import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.CatalogService;
 import org.killbill.billing.catalog.api.StaticCatalog;
 import org.killbill.billing.catalog.caching.CatalogCache;
-import org.killbill.billing.catalog.caching.CatalogCacheInvalidationCallback;
 import org.killbill.billing.catalog.glue.CatalogModule;
+import org.killbill.billing.catalog.override.PriceOverride;
+import org.killbill.billing.catalog.plugin.api.CatalogPluginApi;
+import org.killbill.billing.catalog.plugin.api.StandalonePluginCatalog;
+import org.killbill.billing.catalog.plugin.api.VersionedPluginCatalog;
+import org.killbill.billing.osgi.api.OSGIServiceRegistration;
+import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.platform.api.KillbillService;
 import org.killbill.billing.platform.api.LifecycleHandlerType;
 import org.killbill.billing.platform.api.LifecycleHandlerType.LifecycleLevel;
 import org.killbill.billing.tenant.api.TenantInternalApi;
 import org.killbill.billing.tenant.api.TenantInternalApi.CacheInvalidationCallback;
 import org.killbill.billing.tenant.api.TenantKV.TenantKey;
+import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.config.CatalogConfig;
+import org.killbill.clock.Clock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -57,12 +67,23 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
     public DefaultCatalogService(final CatalogConfig config,
                                  final TenantInternalApi tenantInternalApi,
                                  final CatalogCache catalogCache,
-                                 @Named(CatalogModule.CATALOG_INVALIDATION_CALLBACK) final CacheInvalidationCallback cacheInvalidationCallback) {
+                                 @Named(CatalogModule.CATALOG_INVALIDATION_CALLBACK) final CacheInvalidationCallback cacheInvalidationCallback
+                                ) {
+        super();
         this.config = config;
         this.catalogCache = catalogCache;
         this.cacheInvalidationCallback = cacheInvalidationCallback;
         this.tenantInternalApi = tenantInternalApi;
         this.isInitialized = false;
+    }
+
+    private CatalogPluginApi selectCatalogPlugin(final OSGIServiceRegistration<CatalogPluginApi> pluginRegistry) {
+        final Iterator<String> nameIterator = pluginRegistry.getAllServices().iterator();
+        if (nameIterator.hasNext()) {
+            return pluginRegistry.getServiceForName(nameIterator.next());
+        } else {
+            return null;
+        }
     }
 
     @LifecycleHandlerType(LifecycleLevel.LOAD_CATALOG)
@@ -75,7 +96,7 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
                     log.info("Successfully loaded the default catalog " + config.getCatalogURI());
                 }
                 isInitialized = true;
-            } catch (Exception e) {
+            } catch (final Exception e) {
                 throw new ServiceException(e);
             }
         }
@@ -86,7 +107,7 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
         tenantInternalApi.initializeCacheInvalidationCallback(TenantKey.CATALOG, cacheInvalidationCallback);
     }
 
-        @Override
+    @Override
     public String getName() {
         return CATALOG_SERVICE_NAME;
     }
@@ -104,4 +125,5 @@ public class DefaultCatalogService implements KillbillService, CatalogService {
     private VersionedCatalog getCatalog(final InternalTenantContext context) throws CatalogApiException {
         return catalogCache.getCatalog(context);
     }
+
 }
