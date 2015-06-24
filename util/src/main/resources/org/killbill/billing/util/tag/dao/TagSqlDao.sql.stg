@@ -116,7 +116,7 @@ join (<userAndSystemTagDefinitions()>) td on td.id = t.tag_definition_id
 where (<searchQuery(tagAlias="t.", tagDefinitionAlias="td.")>)
 <AND_CHECK_TENANT("t.")>
 order by <recordIdField("t.")> ASC
-limit :offset, :rowCount
+limit :rowCount offset :offset
 ;
 >>
 
