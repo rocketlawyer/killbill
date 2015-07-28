@@ -105,7 +105,7 @@ from <tableName()> t
 where t.plugin_name = :pluginName
 and t.is_active = 1
 order by t.record_id
-limit :offset, :rowCount
+limit :rowCount offset :offset
 ;
 >>
 
