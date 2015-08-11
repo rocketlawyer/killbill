@@ -17,23 +17,24 @@
 
 package org.killbill.billing.payment.core.janitor;
 
+import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import javax.inject.Inject;
 import javax.inject.Named;
 
-import org.killbill.billing.account.api.AccountInternalApi;
-import org.killbill.billing.osgi.api.OSGIServiceRegistration;
-import org.killbill.billing.payment.core.sm.PaymentStateMachineHelper;
-import org.killbill.billing.payment.core.sm.PluginRoutingPaymentAutomatonRunner;
-import org.killbill.billing.payment.core.sm.RetryStateMachineHelper;
-import org.killbill.billing.payment.dao.PaymentDao;
+import org.joda.time.DateTime;
+import org.killbill.billing.events.PaymentInternalEvent;
+import org.killbill.billing.payment.glue.DefaultPaymentService;
 import org.killbill.billing.payment.glue.PaymentModule;
-import org.killbill.billing.payment.plugin.api.PaymentPluginApi;
-import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.config.PaymentConfig;
-import org.killbill.clock.Clock;
+import org.killbill.notificationq.api.NotificationEvent;
+import org.killbill.notificationq.api.NotificationQueue;
+import org.killbill.notificationq.api.NotificationQueueService;
+import org.killbill.notificationq.api.NotificationQueueService.NoSuchNotificationQueue;
+import org.killbill.notificationq.api.NotificationQueueService.NotificationQueueAlreadyExists;
+import org.killbill.notificationq.api.NotificationQueueService.NotificationQueueHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,35 +46,52 @@ public class Janitor {
     private static final Logger log = LoggerFactory.getLogger(Janitor.class);
 
     private static final int TERMINATION_TIMEOUT_SEC = 5;
+    public static final String QUEUE_NAME = "janitor";
 
+    private final NotificationQueueService notificationQueueService;
     private final ScheduledExecutorService janitorExecutor;
     private final PaymentConfig paymentConfig;
-    private final PendingTransactionTask pendingTransactionTask;
-    private final AttemptCompletionTask attemptCompletionTask;
-    private final ErroredPaymentTask erroredPaymentCompletionTask;
+    private final IncompletePaymentAttemptTask incompletePaymentAttemptTask;
+    private final IncompletePaymentTransactionTask incompletePaymentTransactionTask;
+
+    private NotificationQueue janitorQueue;
 
     private volatile boolean isStopped;
 
     @Inject
-    public Janitor(final AccountInternalApi accountInternalApi,
-                   final PaymentDao paymentDao,
-                   final PaymentConfig paymentConfig,
-                   final Clock clock,
-                   final InternalCallContextFactory internalCallContextFactory,
-                   final PluginRoutingPaymentAutomatonRunner pluginControlledPaymentAutomatonRunner,
+    public Janitor(final PaymentConfig paymentConfig,
+                   final NotificationQueueService notificationQueueService,
                    @Named(PaymentModule.JANITOR_EXECUTOR_NAMED) final ScheduledExecutorService janitorExecutor,
-                   final PaymentStateMachineHelper paymentSMHelper,
-                   final RetryStateMachineHelper retrySMHelper,
-                   final OSGIServiceRegistration<PaymentPluginApi> pluginRegistry) {
+                   final IncompletePaymentAttemptTask incompletePaymentAttemptTask,
+                   final IncompletePaymentTransactionTask incompletePaymentTransactionTask) {
+        this.notificationQueueService = notificationQueueService;
         this.janitorExecutor = janitorExecutor;
         this.paymentConfig = paymentConfig;
-        this.pendingTransactionTask = new PendingTransactionTask(this, internalCallContextFactory, paymentConfig, paymentDao, clock, paymentSMHelper, retrySMHelper,
-                                                                 accountInternalApi, pluginControlledPaymentAutomatonRunner, pluginRegistry);
-        this.attemptCompletionTask = new AttemptCompletionTask(this, internalCallContextFactory, paymentConfig, paymentDao, clock, paymentSMHelper, retrySMHelper,
-                                                               accountInternalApi, pluginControlledPaymentAutomatonRunner, pluginRegistry);
-        this.erroredPaymentCompletionTask = new ErroredPaymentTask(this, internalCallContextFactory, paymentConfig, paymentDao, clock, paymentSMHelper, retrySMHelper,
-                                                                   accountInternalApi, pluginControlledPaymentAutomatonRunner, pluginRegistry);
+        this.incompletePaymentAttemptTask = incompletePaymentAttemptTask;
+        this.incompletePaymentTransactionTask = incompletePaymentTransactionTask;
         this.isStopped = false;
+    }
+
+    public void initialize() throws NotificationQueueAlreadyExists {
+        janitorQueue = notificationQueueService.createNotificationQueue(DefaultPaymentService.SERVICE_NAME,
+                                                                        QUEUE_NAME,
+                                                                        new NotificationQueueHandler() {
+                                                                            @Override
+                                                                            public void handleReadyNotification(final NotificationEvent notificationKey, final DateTime eventDateTime, final UUID userToken, final Long accountRecordId, final Long tenantRecordId) {
+                                                                                if (!(notificationKey instanceof JanitorNotificationKey)) {
+                                                                                    log.error("Janitor service received an unexpected event type {}" + notificationKey.getClass().getName());
+                                                                                    return;
+
+                                                                                }
+                                                                                final JanitorNotificationKey janitorKey = (JanitorNotificationKey) notificationKey;
+                                                                                if (janitorKey.getTaskName().equals(incompletePaymentTransactionTask.getClass().toString())) {
+                                                                                    incompletePaymentTransactionTask.processNotification(janitorKey, userToken, accountRecordId, tenantRecordId);
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                       );
+        incompletePaymentTransactionTask.attachJanitorQueue(janitorQueue);
+        incompletePaymentAttemptTask.attachJanitorQueue(janitorQueue);
     }
 
     public void start() {
@@ -82,27 +100,28 @@ public class Janitor {
             return;
         }
 
-        // Start task for removing old pending payments.
-        final TimeUnit pendingRateUnit = paymentConfig.getJanitorRunningRate().getUnit();
-        final long pendingPeriod = paymentConfig.getJanitorRunningRate().getPeriod();
-        janitorExecutor.scheduleAtFixedRate(pendingTransactionTask, pendingPeriod, pendingPeriod, pendingRateUnit);
+        janitorQueue.startQueue();
 
         // Start task for completing incomplete payment attempts
         final TimeUnit attemptCompletionRateUnit = paymentConfig.getJanitorRunningRate().getUnit();
         final long attemptCompletionPeriod = paymentConfig.getJanitorRunningRate().getPeriod();
-        janitorExecutor.scheduleAtFixedRate(attemptCompletionTask, attemptCompletionPeriod, attemptCompletionPeriod, attemptCompletionRateUnit);
+        janitorExecutor.scheduleAtFixedRate(incompletePaymentAttemptTask, attemptCompletionPeriod, attemptCompletionPeriod, attemptCompletionRateUnit);
 
         // Start task for completing incomplete payment attempts
         final TimeUnit erroredCompletionRateUnit = paymentConfig.getJanitorRunningRate().getUnit();
         final long erroredCompletionPeriod = paymentConfig.getJanitorRunningRate().getPeriod();
-        janitorExecutor.scheduleAtFixedRate(erroredPaymentCompletionTask, erroredCompletionPeriod, erroredCompletionPeriod, erroredCompletionRateUnit);
+        janitorExecutor.scheduleAtFixedRate(incompletePaymentTransactionTask, erroredCompletionPeriod, erroredCompletionPeriod, erroredCompletionRateUnit);
     }
 
-    public void stop() {
+    public void stop() throws NoSuchNotificationQueue {
         if (isStopped) {
             log.warn("Janitor is already in a stopped state");
             return;
         }
+
+        incompletePaymentAttemptTask.stop();
+        incompletePaymentTransactionTask.stop();
+
         try {
             /* Previously submitted tasks will be executed with shutdown(); when task executes as a result of shutdown being called
              * or because it was already in its execution loop, it will check for the volatile boolean isStopped flag and
@@ -114,6 +133,11 @@ public class Janitor {
             if (!success) {
                 log.warn("Janitor failed to complete termination within " + TERMINATION_TIMEOUT_SEC + "sec");
             }
+
+            if (janitorQueue != null) {
+                janitorQueue.stopQueue();
+                notificationQueueService.deleteNotificationQueue(DefaultPaymentService.SERVICE_NAME, QUEUE_NAME);
+            }
         } catch (final InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("Janitor stop sequence got interrupted");
@@ -122,7 +146,8 @@ public class Janitor {
         }
     }
 
-    public boolean isStopped() {
-        return isStopped;
+    public void processPaymentEvent(final PaymentInternalEvent event) {
+        incompletePaymentAttemptTask.processPaymentEvent(event, janitorQueue);
+        incompletePaymentTransactionTask.processPaymentEvent(event, janitorQueue);
     }
 }

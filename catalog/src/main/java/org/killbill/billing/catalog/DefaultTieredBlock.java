@@ -49,4 +49,32 @@ public class DefaultTieredBlock extends DefaultBlock implements TieredBlock {
         super.setType(BlockType.TIERED);
         return this;
     }
+
+    @Override
+    public boolean equals(final Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (!(o instanceof DefaultTieredBlock)) {
+            return false;
+        }
+        if (!super.equals(o)) {
+            return false;
+        }
+
+        final DefaultTieredBlock that = (DefaultTieredBlock) o;
+
+        if (max != null ? !max.equals(that.max) : that.max != null) {
+            return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        int result = super.hashCode();
+        result = 31 * result + (max != null ? max.hashCode() : 0);
+        return result;
+    }
 }

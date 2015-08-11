@@ -40,7 +40,8 @@ import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionStatus;
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.core.PaymentProcessor;
-import org.killbill.billing.payment.core.PluginRoutingPaymentProcessor;
+import org.killbill.billing.payment.core.PluginControlPaymentProcessor;
+import org.killbill.billing.payment.core.sm.control.PaymentStateControlContext;
 import org.killbill.billing.payment.dao.MockPaymentDao;
 import org.killbill.billing.payment.dao.PaymentAttemptModelDao;
 import org.killbill.billing.payment.dao.PaymentDao;
@@ -49,9 +50,9 @@ import org.killbill.billing.payment.dao.PaymentTransactionModelDao;
 import org.killbill.billing.payment.dao.PluginPropertySerializer;
 import org.killbill.billing.payment.glue.PaymentModule;
 import org.killbill.billing.payment.plugin.api.PaymentPluginApi;
-import org.killbill.billing.payment.provider.MockPaymentRoutingProviderPlugin;
+import org.killbill.billing.payment.provider.MockPaymentControlProviderPlugin;
 import org.killbill.billing.payment.retry.BaseRetryService.RetryServiceScheduler;
-import org.killbill.billing.routing.plugin.api.PaymentRoutingPluginApi;
+import org.killbill.billing.control.plugin.api.PaymentControlPluginApi;
 import org.killbill.billing.tag.TagInternalApi;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.dao.NonEntityDao;
@@ -92,7 +93,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
     @Inject
     private OSGIServiceRegistration<PaymentPluginApi> pluginRegistry;
     @Inject
-    private OSGIServiceRegistration<PaymentRoutingPluginApi> retryPluginRegistry;
+    private OSGIServiceRegistration<PaymentControlPluginApi> retryPluginRegistry;
     @Inject
     private TagInternalApi tagApi;
     @Inject
@@ -106,7 +107,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
     @Inject
     private PaymentStateMachineHelper paymentSMHelper;
     @Inject
-    private RetryStateMachineHelper retrySMHelper;
+    private PaymentControlStateMachineHelper retrySMHelper;
     @Inject
     private InternalCallContextFactory internalCallContextFactory;
 
@@ -119,13 +120,13 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
     private final BigDecimal amount = BigDecimal.ONE;
     private final Currency currency = Currency.EUR;
     private final ImmutableList<PluginProperty> emptyProperties = ImmutableList.of();
-    private final MockPaymentRoutingProviderPlugin mockRetryProviderPlugin = new MockPaymentRoutingProviderPlugin();
+    private final MockPaymentControlProviderPlugin mockRetryProviderPlugin = new MockPaymentControlProviderPlugin();
 
     private byte[] EMPTY_PROPERTIES;
     private MockRetryablePaymentAutomatonRunner runner;
-    private RetryablePaymentStateContext paymentStateContext;
+    private PaymentStateControlContext paymentStateContext;
     private MockRetryAuthorizeOperationCallback mockRetryAuthorizeOperationCallback;
-    private PluginRoutingPaymentProcessor processor;
+    private PluginControlPaymentProcessor processor;
 
     @BeforeClass(groups = "fast")
     public void beforeClass() throws Exception {
@@ -141,7 +142,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
 
             @Override
             public String getRegistrationName() {
-                return MockPaymentRoutingProviderPlugin.PLUGIN_NAME;
+                return MockPaymentControlProviderPlugin.PLUGIN_NAME;
             }
         }, mockRetryProviderPlugin);
         EMPTY_PROPERTIES = PluginPropertySerializer.serialize(ImmutableList.<PluginProperty>of());
@@ -171,7 +172,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
                 eventBus);
 
         paymentStateContext =
-                new RetryablePaymentStateContext(ImmutableList.<String>of(MockPaymentRoutingProviderPlugin.PLUGIN_NAME),
+                new PaymentStateControlContext(ImmutableList.<String>of(MockPaymentControlProviderPlugin.PLUGIN_NAME),
                                                  true,
                                                  null,
                                                  paymentExternalKey,
@@ -194,7 +195,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
                                                         paymentDao,
                                                         clock);
 
-        processor = new PluginRoutingPaymentProcessor(pluginRegistry,
+        processor = new PluginControlPaymentProcessor(pluginRegistry,
                                                       accountInternalApi,
                                                       null,
                                                       tagApi,
@@ -636,7 +637,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
                                                      new PaymentTransactionModelDao(transactionId, attempt.getId(), paymentTransactionExternalKey, utcNow, utcNow, paymentId, TransactionType.AUTHORIZE, utcNow, TransactionStatus.PAYMENT_FAILURE, amount, currency, "bla", "foo"),
                                                      internalCallContext);
 
-        processor.retryPaymentTransaction(attempt.getId(), ImmutableList.<String>of(MockPaymentRoutingProviderPlugin.PLUGIN_NAME), internalCallContext);
+        processor.retryPaymentTransaction(attempt.getId(), ImmutableList.<String>of(MockPaymentControlProviderPlugin.PLUGIN_NAME), internalCallContext);
 
         final List<PaymentAttemptModelDao> pas = paymentDao.getPaymentAttemptByTransactionExternalKey(paymentTransactionExternalKey, internalCallContext);
         assertEquals(pas.size(), 2);
@@ -680,7 +681,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
                                                      internalCallContext
                                                     );
 
-        processor.retryPaymentTransaction(attempt.getId(), ImmutableList.<String>of(MockPaymentRoutingProviderPlugin.PLUGIN_NAME), internalCallContext);
+        processor.retryPaymentTransaction(attempt.getId(), ImmutableList.<String>of(MockPaymentControlProviderPlugin.PLUGIN_NAME), internalCallContext);
 
         final List<PaymentAttemptModelDao> pas = paymentDao.getPaymentAttemptByTransactionExternalKey(paymentTransactionExternalKey, internalCallContext);
         assertEquals(pas.size(), 2);
@@ -728,7 +729,7 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
                                                          internalCallContext
                                                         );
 
-            processor.retryPaymentTransaction(attempt.getId(), ImmutableList.<String>of(MockPaymentRoutingProviderPlugin.PLUGIN_NAME), internalCallContext);
+            processor.retryPaymentTransaction(attempt.getId(), ImmutableList.<String>of(MockPaymentControlProviderPlugin.PLUGIN_NAME), internalCallContext);
 
             final List<PaymentAttemptModelDao> pas = paymentDao.getPaymentAttemptByTransactionExternalKey(paymentTransactionExternalKey, internalCallContext);
             assertEquals(pas.size(), 2);
@@ -745,7 +746,5 @@ public class TestRetryablePayment extends PaymentTestSuiteNoDB {
                 lock.release();
             }
         }
-
     }
-
 }

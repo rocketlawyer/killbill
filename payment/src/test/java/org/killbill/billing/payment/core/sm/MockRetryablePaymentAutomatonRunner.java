@@ -1,7 +1,8 @@
 /*
- * Copyright 2014 Groupon, Inc
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Groupon licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -36,12 +37,13 @@ import org.killbill.billing.payment.api.PaymentApiException;
 import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.core.PaymentProcessor;
+import org.killbill.billing.payment.core.sm.control.PaymentStateControlContext;
 import org.killbill.billing.payment.dao.PaymentDao;
 import org.killbill.billing.payment.dispatcher.PluginDispatcher;
 import org.killbill.billing.payment.glue.PaymentModule;
 import org.killbill.billing.payment.plugin.api.PaymentPluginApi;
 import org.killbill.billing.payment.retry.BaseRetryService.RetryServiceScheduler;
-import org.killbill.billing.routing.plugin.api.PaymentRoutingPluginApi;
+import org.killbill.billing.control.plugin.api.PaymentControlPluginApi;
 import org.killbill.billing.tag.TagInternalApi;
 import org.killbill.billing.util.callcontext.CallContext;
 import org.killbill.billing.util.config.PaymentConfig;
@@ -52,20 +54,20 @@ import org.killbill.commons.locker.GlobalLocker;
 import static org.killbill.billing.payment.glue.PaymentModule.PLUGIN_EXECUTOR_NAMED;
 import static org.killbill.billing.payment.glue.PaymentModule.RETRYABLE_NAMED;
 
-public class MockRetryablePaymentAutomatonRunner extends PluginRoutingPaymentAutomatonRunner {
+public class MockRetryablePaymentAutomatonRunner extends PluginControlPaymentAutomatonRunner {
 
     private OperationCallback operationCallback;
-    private RetryablePaymentStateContext context;
+    private PaymentStateControlContext context;
 
     @Inject
-    public MockRetryablePaymentAutomatonRunner(@Named(PaymentModule.STATE_MACHINE_PAYMENT) final StateMachineConfig stateMachineConfig, @Named(PaymentModule.STATE_MACHINE_RETRY) final StateMachineConfig retryStateMachine, final PaymentDao paymentDao, final GlobalLocker locker, final OSGIServiceRegistration<PaymentPluginApi> pluginRegistry, final OSGIServiceRegistration<PaymentRoutingPluginApi> retryPluginRegistry, final Clock clock, final TagInternalApi tagApi, final PaymentProcessor paymentProcessor,
+    public MockRetryablePaymentAutomatonRunner(@Named(PaymentModule.STATE_MACHINE_PAYMENT) final StateMachineConfig stateMachineConfig, @Named(PaymentModule.STATE_MACHINE_RETRY) final StateMachineConfig retryStateMachine, final PaymentDao paymentDao, final GlobalLocker locker, final OSGIServiceRegistration<PaymentPluginApi> pluginRegistry, final OSGIServiceRegistration<PaymentControlPluginApi> retryPluginRegistry, final Clock clock, final TagInternalApi tagApi, final PaymentProcessor paymentProcessor,
                                                @Named(RETRYABLE_NAMED) final RetryServiceScheduler retryServiceScheduler, final PaymentConfig paymentConfig, @com.google.inject.name.Named(PLUGIN_EXECUTOR_NAMED) final ExecutorService executor,
-                                               final PaymentStateMachineHelper paymentSMHelper, final RetryStateMachineHelper retrySMHelper, final PersistentBus eventBus) {
+                                               final PaymentStateMachineHelper paymentSMHelper, final PaymentControlStateMachineHelper retrySMHelper, final PersistentBus eventBus) {
         super(stateMachineConfig, paymentDao, locker, pluginRegistry, retryPluginRegistry, clock, paymentProcessor, retryServiceScheduler, paymentConfig, executor, paymentSMHelper, retrySMHelper, eventBus);
     }
 
     @Override
-    OperationCallback createOperationCallback(final TransactionType transactionType, final RetryablePaymentStateContext paymentStateContext) {
+    OperationCallback createOperationCallback(final TransactionType transactionType, final PaymentStateControlContext paymentStateContext) {
         if (operationCallback == null) {
             return super.createOperationCallback(transactionType, paymentStateContext);
         } else {
@@ -74,11 +76,11 @@ public class MockRetryablePaymentAutomatonRunner extends PluginRoutingPaymentAut
     }
 
     @Override
-    RetryablePaymentStateContext createContext(final boolean isApiPayment, final TransactionType transactionType, final Account account, @Nullable final UUID paymentMethodId,
-                                                     @Nullable final UUID paymentId, @Nullable final String paymentExternalKey, final String paymentTransactionExternalKey,
-                                                     @Nullable final BigDecimal amount, @Nullable final Currency currency,
-                                                     final Iterable<PluginProperty> properties,
-                                                     final List<String> pluginNames, final CallContext callContext, final InternalCallContext internalCallContext) throws PaymentApiException {
+    PaymentStateControlContext createContext(final boolean isApiPayment, final TransactionType transactionType, final Account account, @Nullable final UUID paymentMethodId,
+                                             @Nullable final UUID paymentId, @Nullable final String paymentExternalKey, final String paymentTransactionExternalKey,
+                                             @Nullable final BigDecimal amount, @Nullable final Currency currency,
+                                             final Iterable<PluginProperty> properties,
+                                             final List<String> pluginNames, final CallContext callContext, final InternalCallContext internalCallContext) throws PaymentApiException {
         if (context == null) {
             return super.createContext(isApiPayment, transactionType, account, paymentMethodId, paymentId, paymentExternalKey, paymentTransactionExternalKey,
                                        amount, currency, properties, pluginNames, callContext, internalCallContext);
@@ -92,7 +94,7 @@ public class MockRetryablePaymentAutomatonRunner extends PluginRoutingPaymentAut
         return this;
     }
 
-    public MockRetryablePaymentAutomatonRunner setContext(final RetryablePaymentStateContext context) {
+    public MockRetryablePaymentAutomatonRunner setContext(final PaymentStateControlContext context) {
         this.context = context;
         return this;
     }
@@ -101,7 +103,7 @@ public class MockRetryablePaymentAutomatonRunner extends PluginRoutingPaymentAut
         return paymentPluginDispatcher;
     }
 
-    public OSGIServiceRegistration<PaymentRoutingPluginApi> getRetryPluginRegistry() {
+    public OSGIServiceRegistration<PaymentControlPluginApi> getRetryPluginRegistry() {
         return paymentControlPluginRegistry;
     }
 }
