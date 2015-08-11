@@ -31,6 +31,7 @@ import org.killbill.billing.payment.api.PaymentApiException;
 import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionStatus;
 import org.killbill.billing.payment.api.TransactionType;
+import org.killbill.billing.payment.core.sm.payments.PaymentEnteringStateCallback;
 import org.killbill.billing.payment.dao.PaymentTransactionModelDao;
 import org.killbill.billing.payment.plugin.api.PaymentPluginStatus;
 import org.killbill.billing.payment.plugin.api.PaymentTransactionInfoPlugin;
@@ -88,7 +89,7 @@ public class TestPaymentEnteringStateCallback extends PaymentTestSuiteWithEmbedd
         Mockito.when(paymentInfoPlugin.getStatus()).thenReturn(PaymentPluginStatus.PENDING);
         Mockito.when(paymentInfoPlugin.getGatewayErrorCode()).thenReturn(UUID.randomUUID().toString().substring(0, 5));
         Mockito.when(paymentInfoPlugin.getGatewayError()).thenReturn(UUID.randomUUID().toString());
-        paymentStateContext.setPaymentInfoPlugin(paymentInfoPlugin);
+        paymentStateContext.setPaymentTransactionInfoPlugin(paymentInfoPlugin);
 
         // Process the plugin result
         callback.enteringState(state, operationCallback, operationResult, leavingStateCallback);
@@ -102,18 +103,6 @@ public class TestPaymentEnteringStateCallback extends PaymentTestSuiteWithEmbedd
         Assert.assertEquals(paymentTransaction.getTransactionStatus(), TransactionStatus.PENDING);
         Assert.assertEquals(paymentTransaction.getGatewayErrorCode(), paymentInfoPlugin.getGatewayErrorCode());
         Assert.assertEquals(paymentTransaction.getGatewayErrorMsg(), paymentInfoPlugin.getGatewayError());
-    }
-
-    @Test(groups = "slow")
-    public void testEnterStateWithOperationException() throws Exception {
-        daoHelper.createNewPaymentTransaction();
-        // Simulate a bug in the plugin - i.e. nothing was returned
-        paymentStateContext.setPaymentInfoPlugin(null);
-        operationResult = OperationResult.EXCEPTION;
-
-        callback.enteringState(state, operationCallback, operationResult, leavingStateCallback);
-
-        Assert.assertEquals(paymentDao.getPaymentTransaction(paymentStateContext.getPaymentTransactionModelDao().getId(), internalCallContext).getTransactionStatus(), TransactionStatus.PLUGIN_FAILURE);
     }
 
     private static final class PaymentEnteringStateTestCallback extends PaymentEnteringStateCallback {

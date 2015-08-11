@@ -63,7 +63,7 @@ public class TestStringTemplateInheritance extends UtilTestSuiteNoDB {
         final StringTemplateGroup kombucha = new StringTemplateGroup(new InputStreamReader(kombuchaStream));
 
         // Verify non inherited template
-        Assert.assertEquals(kombucha.getInstanceOf("isIsTimeForKombucha").toString(), "select hour(current_timestamp()) = 17 as is_time;");
+        Assert.assertEquals(kombucha.getInstanceOf("isIsTimeForKombucha").toString(), "select hour(current_timestamp(0)) = 17 as is_time;");
 
         // Verify inherited templates
         assertPattern(kombucha.getInstanceOf("getById").toString(), "select\r?\n" +
@@ -125,7 +125,7 @@ public class TestStringTemplateInheritance extends UtilTestSuiteNoDB {
                                                                                                                                                           "from kombucha t\r?\n" +
                                                                                                                                                           "where t.tenant_record_id = :tenantRecordId\r?\n" +
                                                                                                                                                           "order by t.record_id\r?\n" +
-                                                                                                                                                          "limit :offset, :rowCount\r?\n" +
+                                                                                                                                                          "limit :rowCount offset :offset\r?\n" +
                                                                                                                                                           ";");
         assertPattern(kombucha.getInstanceOf("test").toString(), "select\r?\n" +
                                                                  "  t.record_id\r?\n" +

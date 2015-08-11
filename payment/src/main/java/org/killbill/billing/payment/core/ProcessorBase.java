@@ -67,7 +67,7 @@ import com.google.common.collect.Iterables;
 
 public abstract class ProcessorBase {
 
-    private static final int NB_LOCK_TRY = 5;
+    public static final int NB_LOCK_TRY = 5;
 
     protected final OSGIServiceRegistration<PaymentPluginApi> pluginRegistry;
     protected final AccountInternalApi accountInternalApi;
@@ -164,28 +164,8 @@ public abstract class ProcessorBase {
         return internalCallContextFactory.createCallContext(context);
     }
 
-    protected void validateUniqueTransactionExternalKey(@Nullable final String transactionExternalKey, final InternalTenantContext tenantContext) throws PaymentApiException {
-        // If no key specified, system will allocate a unique one later.
-        if (transactionExternalKey == null) {
-            return;
-        }
-
-        final List<PaymentTransactionModelDao> transactions = paymentDao.getPaymentTransactionsByExternalKey(transactionExternalKey, tenantContext);
-        final PaymentTransactionModelDao transactionAlreadyExists = Iterables.tryFind(transactions, new Predicate<PaymentTransactionModelDao>() {
-            @Override
-            public boolean apply(final PaymentTransactionModelDao input) {
-                return input.getTransactionStatus() == TransactionStatus.SUCCESS ||
-                       input.getTransactionStatus() == TransactionStatus.UNKNOWN;
-            }
-        }).orNull();
-        if (transactionAlreadyExists != null) {
-            throw new PaymentApiException(ErrorCode.PAYMENT_ACTIVE_TRANSACTION_KEY_EXISTS, transactionExternalKey);
-        }
-    }
-
     // TODO Rename - there is no lock!
     public interface WithAccountLockCallback<PluginDispatcherReturnType, ExceptionType extends Exception> {
-
         public PluginDispatcherReturnType doOperation() throws ExceptionType;
     }
 

@@ -1,8 +1,8 @@
 /*
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Groupon licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -45,11 +45,32 @@ import org.killbill.billing.osgi.api.OSGIServiceRegistration;
 import org.killbill.billing.payment.api.PaymentApiException;
 import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionType;
+import org.killbill.billing.payment.core.sm.payments.AuthorizeCompleted;
+import org.killbill.billing.payment.core.sm.payments.AuthorizeInitiated;
+import org.killbill.billing.payment.core.sm.payments.AuthorizeOperation;
+import org.killbill.billing.payment.core.sm.payments.CaptureCompleted;
+import org.killbill.billing.payment.core.sm.payments.CaptureInitiated;
+import org.killbill.billing.payment.core.sm.payments.CaptureOperation;
+import org.killbill.billing.payment.core.sm.payments.ChargebackCompleted;
+import org.killbill.billing.payment.core.sm.payments.ChargebackInitiated;
+import org.killbill.billing.payment.core.sm.payments.ChargebackOperation;
+import org.killbill.billing.payment.core.sm.payments.CreditCompleted;
+import org.killbill.billing.payment.core.sm.payments.CreditInitiated;
+import org.killbill.billing.payment.core.sm.payments.CreditOperation;
+import org.killbill.billing.payment.core.sm.payments.PurchaseCompleted;
+import org.killbill.billing.payment.core.sm.payments.PurchaseInitiated;
+import org.killbill.billing.payment.core.sm.payments.PurchaseOperation;
+import org.killbill.billing.payment.core.sm.payments.RefundCompleted;
+import org.killbill.billing.payment.core.sm.payments.RefundInitiated;
+import org.killbill.billing.payment.core.sm.payments.RefundOperation;
+import org.killbill.billing.payment.core.sm.payments.VoidCompleted;
+import org.killbill.billing.payment.core.sm.payments.VoidInitiated;
+import org.killbill.billing.payment.core.sm.payments.VoidOperation;
 import org.killbill.billing.payment.dao.PaymentDao;
 import org.killbill.billing.payment.dao.PaymentModelDao;
 import org.killbill.billing.payment.dispatcher.PluginDispatcher;
 import org.killbill.billing.payment.glue.PaymentModule;
-import org.killbill.billing.payment.invoice.InvoicePaymentRoutingPluginApi;
+import org.killbill.billing.payment.invoice.InvoicePaymentControlPluginApi;
 import org.killbill.billing.payment.plugin.api.PaymentPluginApi;
 import org.killbill.billing.util.callcontext.CallContext;
 import org.killbill.billing.util.config.PaymentConfig;
@@ -176,6 +197,17 @@ public class PaymentAutomatonRunner {
         return paymentStateContext.getPaymentId();
     }
 
+    //
+    // TODO Fix fields accessed by some callbacks (which are not injected)
+    //
+    public PaymentDao getPaymentDao() {
+        return paymentDao;
+    }
+
+    public Clock getClock() {
+        return clock;
+    }
+
     protected void runStateMachineOperation(final String initialStateName, final TransactionType transactionType,
                                             final LeavingStateCallback leavingStateCallback, final OperationCallback operationCallback, final EnteringStateCallback enteringStateCallback,
                                             final UUID accountId, final String invoiceId) throws PaymentApiException {
@@ -204,7 +236,7 @@ public class PaymentAutomatonRunner {
         final PluginProperty invoiceProperty = Iterables.tryFind(properties, new Predicate<PluginProperty>() {
             @Override
             public boolean apply(final PluginProperty input) {
-                return InvoicePaymentRoutingPluginApi.PROP_IPCD_INVOICE_ID.equals(input.getKey());
+                return InvoicePaymentControlPluginApi.PROP_IPCD_INVOICE_ID.equals(input.getKey());
             }
         }).orNull();
 

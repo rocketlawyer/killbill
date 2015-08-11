@@ -62,17 +62,16 @@ public interface PaymentSqlDao extends EntitySqlDao<PaymentModelDao, Payment> {
                                                    @BindBean final InternalTenantContext context);
 
     @SqlQuery
-    public List<PaymentModelDao> getPaymentsByStates(@StateCollectionBinder final Collection<String> states,
-                                                     @Bind("createdBeforeDate") final Date createdBeforeDate,
-                                                     @Bind("createdAfterDate") final Date createdAfterDate,
-                                                     @BindBean final InternalTenantContext context,
-                                                     @Bind("limit") final int limit);
+    public List<PaymentModelDao> getPaymentsByStatesAcrossTenants(@StateCollectionBinder final Collection<String> states,
+                                                                  @Bind("createdBeforeDate") final Date createdBeforeDate,
+                                                                  @Bind("createdAfterDate") final Date createdAfterDate,
+                                                                  @Bind("limit") final int limit);
 
     @SqlQuery
     @SmartFetchSize(shouldStream = true)
     public Iterator<PaymentModelDao> getByPluginName(@Bind("pluginName") final String pluginName,
-                                                           @Bind("offset") final Long offset,
-                                                           @Bind("rowCount") final Long rowCount,
+                                                     @Bind("offset") final Long offset,
+                                                     @Bind("rowCount") final Long rowCount,
                                                            @BindBean final InternalTenantContext context);
 
     @SqlQuery
