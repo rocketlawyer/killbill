@@ -1,8 +1,8 @@
 /*
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
- * Groupon licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -44,11 +44,13 @@ public class PaymentStateContext {
     // Stateful objects created by the callbacks and passed to the other following callbacks in the automaton
     protected List<PaymentTransactionModelDao> onLeavingStateExistingTransactions;
     protected PaymentTransactionModelDao paymentTransactionModelDao;
-    protected PaymentTransactionInfoPlugin paymentInfoPlugin;
+    protected PaymentTransactionInfoPlugin paymentTransactionInfoPlugin;
     protected BigDecimal amount;
     protected String paymentExternalKey;
     protected String paymentTransactionExternalKey;
     protected Currency currency;
+    protected Iterable<PluginProperty> properties;
+    protected boolean skipOperationForUnknownTransaction;
 
     // Can be updated later via paymentTransactionModelDao (e.g. for auth or purchase)
     protected final UUID paymentId;
@@ -56,7 +58,6 @@ public class PaymentStateContext {
     protected final Account account;
     protected final TransactionType transactionType;
     protected final boolean shouldLockAccountAndDispatch;
-    protected final Iterable<PluginProperty> properties;
     protected final InternalCallContext internalCallContext;
     protected final CallContext callContext;
     protected final boolean isApiPayment;
@@ -94,6 +95,7 @@ public class PaymentStateContext {
         this.internalCallContext = internalCallContext;
         this.callContext = callContext;
         this.onLeavingStateExistingTransactions = ImmutableList.of();
+        this.skipOperationForUnknownTransaction = false;
     }
 
     public boolean isApiPayment() {
@@ -120,12 +122,12 @@ public class PaymentStateContext {
         this.onLeavingStateExistingTransactions = onLeavingStateExistingTransactions;
     }
 
-    public PaymentTransactionInfoPlugin getPaymentInfoPlugin() {
-        return paymentInfoPlugin;
+    public PaymentTransactionInfoPlugin getPaymentTransactionInfoPlugin() {
+        return paymentTransactionInfoPlugin;
     }
 
-    public void setPaymentInfoPlugin(final PaymentTransactionInfoPlugin paymentInfoPlugin) {
-        this.paymentInfoPlugin = paymentInfoPlugin;
+    public void setPaymentTransactionInfoPlugin(final PaymentTransactionInfoPlugin paymentTransactionInfoPlugin) {
+        this.paymentTransactionInfoPlugin = paymentTransactionInfoPlugin;
     }
 
     public UUID getPaymentId() {
@@ -198,5 +200,13 @@ public class PaymentStateContext {
 
     public CallContext getCallContext() {
         return callContext;
+    }
+
+    public boolean isSkipOperationForUnknownTransaction() {
+        return skipOperationForUnknownTransaction;
+    }
+
+    public void setSkipOperationForUnknownTransaction(final boolean skipOperationForUnknownTransaction) {
+        this.skipOperationForUnknownTransaction = skipOperationForUnknownTransaction;
     }
 }

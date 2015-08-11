@@ -17,6 +17,7 @@
 package org.killbill.billing.payment.dao;
 
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 
 import org.killbill.billing.callcontext.InternalCallContext;
@@ -41,6 +42,14 @@ public interface PaymentAttemptSqlDao extends EntitySqlDao<PaymentAttemptModelDa
                        @Bind("stateName") final String stateName,
                        @BindBean final InternalCallContext context);
 
+    @SqlUpdate
+    @Audited(ChangeType.UPDATE)
+    void updateAttemptWithProperties(@Bind("id") final String attemptId,
+                                     @Bind("transactionId") final String transactionId,
+                                     @Bind("stateName") final String stateName,
+                                     @Bind("pluginProperties") final byte[] pluginProperties,
+                                     @BindBean final InternalCallContext context);
+
     @SqlQuery
     List<PaymentAttemptModelDao> getByTransactionExternalKey(@Bind("transactionExternalKey") final String transactionExternalKey,
                                                              @BindBean final InternalTenantContext context);
@@ -50,8 +59,13 @@ public interface PaymentAttemptSqlDao extends EntitySqlDao<PaymentAttemptModelDa
                                                          @BindBean final InternalTenantContext context);
 
     @SqlQuery
-    List<PaymentAttemptModelDao> getByStateName(@Bind("stateName") final String stateName,
-                                                @Bind("createdBeforeDate") final Date createdBeforeDate,
-                                                @BindBean final InternalTenantContext context);
+    Long getCountByStateNameAcrossTenants(@Bind("stateName") final String stateName,
+                                          @Bind("createdBeforeDate") final Date createdBeforeDate);
+
+    @SqlQuery
+    Iterator<PaymentAttemptModelDao> getByStateNameAcrossTenants(@Bind("stateName") final String stateName,
+                                                                 @Bind("createdBeforeDate") final Date createdBeforeDate,
+                                                                 @Bind("offset") final Long offset,
+                                                                 @Bind("rowCount") final Long rowCount);
 
 }

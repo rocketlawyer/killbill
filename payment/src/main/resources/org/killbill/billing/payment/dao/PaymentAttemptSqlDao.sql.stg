@@ -65,7 +65,7 @@ where payment_external_key = :paymentExternalKey
 >>
 
 /* Does not include tenant info, global */
-getByStateName() ::= <<
+getByStateNameAcrossTenants() ::= <<
 select
 <allTableFields("")>
 from <tableName()>
@@ -73,6 +73,17 @@ where state_name = :stateName
 and created_date \< :createdBeforeDate
 <andCheckSoftDeletionWithComma("")>
 <defaultOrderBy()>
+limit :rowCount offset :offset
+;
+>>
+
+getCountByStateNameAcrossTenants() ::= <<
+select
+count(1) as count
+from <tableName()>
+where state_name = :stateName
+and created_date \< :createdBeforeDate
+<andCheckSoftDeletionWithComma("")>
 ;
 >>
 
@@ -81,6 +92,18 @@ updateAttempt() ::= <<
 update <tableName()>
 set state_name = :stateName
 , transaction_id = :transactionId
+, updated_by = :updatedBy
+, updated_date = :createdDate
+where id = :id
+<AND_CHECK_TENANT()>
+;
+>>
+
+updateAttemptWithProperties() ::= <<
+update <tableName()>
+set state_name = :stateName
+, transaction_id = :transactionId
+, plugin_properties = :pluginProperties
 , updated_by = :updatedBy
 , updated_date = :createdDate
 where id = :id

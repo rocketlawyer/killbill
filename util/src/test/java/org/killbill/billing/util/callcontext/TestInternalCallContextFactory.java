@@ -41,21 +41,21 @@ public class TestInternalCallContextFactory extends UtilTestSuiteWithEmbeddedDB 
             public Void withHandle(final Handle handle) throws Exception {
                 handle.execute("DROP TABLE IF EXISTS invoices;\n" +
                                "CREATE TABLE invoices (\n" +
-                               "    record_id int(11) unsigned NOT NULL AUTO_INCREMENT,\n" +
-                               "    id char(36) NOT NULL,\n" +
-                               "    account_id char(36) NOT NULL,\n" +
+                               "    record_id serial unique,\n" +
+                               "    id varchar(36) NOT NULL,\n" +
+                               "    account_id varchar(36) NOT NULL,\n" +
                                "    invoice_date date NOT NULL,\n" +
                                "    target_date date NOT NULL,\n" +
-                               "    currency char(3) NOT NULL,\n" +
+                               "    currency varchar(3) NOT NULL,\n" +
                                "    migrated bool NOT NULL,\n" +
                                "    created_by varchar(50) NOT NULL,\n" +
                                "    created_date datetime NOT NULL,\n" +
-                               "    account_record_id int(11) unsigned default null,\n" +
-                               "    tenant_record_id int(11) unsigned default null,\n" +
+                               "    account_record_id bigint /*! unsigned */ not null,\n" +
+                               "    tenant_record_id bigint /*! unsigned */ not null default 0,\n" +
                                "    PRIMARY KEY(record_id)\n" +
                                ");");
                 handle.execute("insert into invoices (id, account_id, invoice_date, target_date, currency, migrated, created_by, created_date, account_record_id) values " +
-                               "(?, ?, now(), now(), 'USD', 0, 'test', now(), ?)", invoiceId.toString(), UUID.randomUUID().toString(), accountRecordId);
+                               "(?, ?, now(), now(), 'USD', false, 'test', now(), ?)", invoiceId.toString(), UUID.randomUUID().toString(), accountRecordId);
                 return null;
             }
         });

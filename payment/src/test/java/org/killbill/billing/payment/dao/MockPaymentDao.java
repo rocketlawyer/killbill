@@ -36,6 +36,7 @@ import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.dao.MockNonEntityDao;
 import org.killbill.billing.payment.api.TransactionStatus;
 import org.killbill.billing.payment.api.TransactionType;
+import org.killbill.billing.util.entity.DefaultPagination;
 import org.killbill.billing.util.entity.Pagination;
 
 import com.google.common.base.Predicate;
@@ -64,36 +65,50 @@ public class MockPaymentDao implements PaymentDao {
     }
 
     @Override
-    public int failOldPendingTransactions(final TransactionStatus newTransactionStatus, final DateTime createdBeforeDate, final InternalCallContext context) {
-        int result = 0;
-        synchronized (transactions) {
-            for (PaymentTransactionModelDao cur : transactions.values()) {
-                cur.setTransactionStatus(newTransactionStatus);
-                result++;
+    public Pagination<PaymentTransactionModelDao> getByTransactionStatusAcrossTenants(final Iterable<TransactionStatus> transactionStatuses, DateTime createdBeforeDate, DateTime createdAfterDate, Long offset, Long limit) {
+        final List<PaymentTransactionModelDao> result=  ImmutableList.copyOf(Iterables.filter(transactions.values(), new Predicate<PaymentTransactionModelDao>() {
+            @Override
+            public boolean apply(final PaymentTransactionModelDao input) {
+                return Iterables.any(transactionStatuses, new Predicate<TransactionStatus>() {
+                    @Override
+                    public boolean apply(final TransactionStatus transactionStatus) {
+                        return input.getTransactionStatus() == transactionStatus;
+                    }
+                });
             }
-        }
-        return result;
+        }));
+        return new DefaultPagination<PaymentTransactionModelDao>(new Long(result.size()), result.iterator());
     }
 
     @Override
     public PaymentAttemptModelDao insertPaymentAttemptWithProperties(final PaymentAttemptModelDao attempt, final InternalCallContext context) {
         attempt.setTenantRecordId(context.getTenantRecordId());
+        attempt.setAccountRecordId(context.getAccountRecordId());
 
         synchronized (this) {
             attempts.put(attempt.getId(), attempt);
             mockNonEntityDao.addTenantRecordIdMapping(attempt.getId(), context);
+            mockNonEntityDao.addAccountRecordIdMapping(attempt.getId(), context);
             return attempt;
         }
     }
 
     @Override
     public void updatePaymentAttempt(final UUID paymentAttemptId, final UUID transactionId, final String state, final InternalCallContext context) {
+        updatePaymentAttemptWithProperties(paymentAttemptId, transactionId, state, null, context);
+    }
+
+    @Override
+    public void updatePaymentAttemptWithProperties(final UUID paymentAttemptId, final UUID transactionId, final String state, final byte[] pluginProperties, final InternalCallContext context) {
         boolean success = false;
         synchronized (this) {
             for (PaymentAttemptModelDao cur : attempts.values()) {
                 if (cur.getId().equals(paymentAttemptId)) {
                     cur.setStateName(state);
                     cur.setTransactionId(transactionId);
+                    if (pluginProperties != null) {
+                        cur.setPluginProperties(pluginProperties);
+                    }
                     success = true;
                     break;
                 }
@@ -105,7 +120,7 @@ public class MockPaymentDao implements PaymentDao {
     }
 
     @Override
-    public List<PaymentAttemptModelDao> getPaymentAttemptsByState(final String stateName, final DateTime createdBeforeDate, final InternalTenantContext context) {
+    public Pagination<PaymentAttemptModelDao> getPaymentAttemptsByStateAcrossTenants(final String stateName, final DateTime createdBeforeDate, final Long offset, final Long limit) {
         return null;
     }
 
@@ -172,15 +187,20 @@ public class MockPaymentDao implements PaymentDao {
 
     @Override
     public PaymentModelDao insertPaymentWithFirstTransaction(final PaymentModelDao payment, final PaymentTransactionModelDao paymentTransaction, final InternalCallContext context) {
+
         payment.setTenantRecordId(context.getTenantRecordId());
         paymentTransaction.setTenantRecordId(context.getTenantRecordId());
+        payment.setAccountRecordId(context.getAccountRecordId());
+        paymentTransaction.setAccountRecordId(context.getAccountRecordId());
 
         synchronized (this) {
             payments.put(payment.getId(), payment);
             mockNonEntityDao.addTenantRecordIdMapping(payment.getId(), context);
+            mockNonEntityDao.addAccountRecordIdMapping((payment.getId()), context);
 
             transactions.put(paymentTransaction.getId(), paymentTransaction);
             mockNonEntityDao.addTenantRecordIdMapping(paymentTransaction.getId(), context);
+            mockNonEntityDao.addAccountRecordIdMapping((paymentTransaction.getId()), context);
         }
         return payment;
     }
@@ -188,10 +208,12 @@ public class MockPaymentDao implements PaymentDao {
     @Override
     public PaymentTransactionModelDao updatePaymentWithNewTransaction(final UUID paymentId, final PaymentTransactionModelDao paymentTransaction, final InternalCallContext context) {
         paymentTransaction.setTenantRecordId(context.getTenantRecordId());
+        paymentTransaction.setAccountRecordId(context.getAccountRecordId());
 
         synchronized (this) {
             transactions.put(paymentTransaction.getId(), paymentTransaction);
             mockNonEntityDao.addTenantRecordIdMapping(paymentId, context);
+            mockNonEntityDao.addAccountRecordIdMapping((paymentTransaction.getId()), context);
         }
         return paymentTransaction;
     }
@@ -244,7 +266,7 @@ public class MockPaymentDao implements PaymentDao {
     }
 
     @Override
-    public List<PaymentModelDao> getPaymentsByStates(final String[] states, final DateTime createdBeforeDate, final DateTime createdAfterDate, final int limit, final InternalTenantContext context) {
+    public List<PaymentModelDao> getPaymentsByStatesAcrossTenants(final String[] states, final DateTime createdBeforeDate, final DateTime createdAfterDate, final int limit) {
         return null;
     }
 

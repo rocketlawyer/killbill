@@ -61,15 +61,15 @@ public interface PaymentConfig extends KillbillConfig {
     @Description("Number of threads for plugin executor dispatcher")
     public int getPaymentPluginThreadNb();
 
-    @Config("org.killbill.payment.janitor.pending")
+    @Config("org.killbill.payment.janitor.attempts.delay")
     @Default("12h")
-    @Description("Delay after which pending transactions should be marked as failed")
-    public TimeSpan getJanitorPendingCleanupTime();
+    @Description("Delay before which unresolved attempt should be retried")
+    public TimeSpan getIncompleteAttemptsTimeSpanDelay();
 
-    @Config("org.killbill.payment.janitor.attempts")
-    @Default("15m")
-    @Description("Delay after which incomplete  attempts should be completed")
-    public TimeSpan getJanitorAttemptCompletionTime();
+    @Config("org.killbill.payment.janitor.transactions.retries")
+    @Default("15s,1m,3m,1h,1d,1d,1d,1d,1d")
+    @Description("Delay before which unresolved transactions should be retried")
+    public List<TimeSpan> getIncompleteTransactionsRetries();
 
     @Config("org.killbill.payment.janitor.rate")
     @Default("1h")

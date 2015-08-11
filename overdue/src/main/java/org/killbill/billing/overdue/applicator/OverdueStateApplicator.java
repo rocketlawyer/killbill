@@ -57,6 +57,7 @@ import org.killbill.billing.overdue.glue.DefaultOverdueModule;
 import org.killbill.billing.overdue.notification.OverdueCheckNotificationKey;
 import org.killbill.billing.overdue.notification.OverdueCheckNotifier;
 import org.killbill.billing.overdue.notification.OverduePoster;
+import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.tag.TagInternalApi;
 import org.killbill.billing.util.api.TagApiException;
 import org.killbill.billing.util.callcontext.CallContext;
@@ -73,6 +74,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Predicate;
+import com.google.common.base.Strings;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
@@ -300,7 +302,7 @@ public class OverdueStateApplicator {
 
             for (final Entitlement cur : toBeCancelled) {
                 try {
-                    cur.cancelEntitlementWithDateOverrideBillingPolicy(new LocalDate(clock.getUTCNow(), account.getTimeZone()), actionPolicy, callContext);
+                    cur.cancelEntitlementWithDateOverrideBillingPolicy(new LocalDate(clock.getUTCNow(), account.getTimeZone()), actionPolicy, ImmutableList.<PluginProperty>of(), callContext);
                 } catch (final EntitlementApiException e) {
                     // If subscription has already been cancelled, there is nothing to do so we can ignore
                     if (e.getCode() != ErrorCode.SUB_CANCEL_BAD_STATE.getCode()) {
@@ -335,6 +337,11 @@ public class OverdueStateApplicator {
 
         // If sending is not configured, skip
         if (nextOverdueState.getEmailNotification() == null) {
+            return;
+        }
+
+        if (Strings.emptyToNull(account.getEmail()) == null) {
+            log.warn("Unable to send overdue notification email for account {} and overdueable {}: no email specified", account.getId(), account.getId());
             return;
         }
 

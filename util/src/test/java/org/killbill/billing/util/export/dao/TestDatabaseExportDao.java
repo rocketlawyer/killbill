@@ -54,16 +54,16 @@ public class TestDatabaseExportDao extends UtilTestSuiteWithEmbeddedDB {
             @Override
             public Void withHandle(final Handle handle) throws Exception {
                 handle.execute("drop table if exists " + tableNameA);
-                handle.execute("create table " + tableNameA + "(record_id int(11) unsigned not null auto_increment," +
+                handle.execute("create table " + tableNameA + "(record_id serial unique," +
                                "a_column char default 'a'," +
-                               "account_record_id int(11) unsigned not null," +
-                               "tenant_record_id int(11) unsigned default 0," +
+                               "account_record_id bigint /*! unsigned */ not null," +
+                               "tenant_record_id bigint /*! unsigned */ not null default 0," +
                                "primary key(record_id));");
                 handle.execute("drop table if exists " + tableNameB);
-                handle.execute("create table " + tableNameB + "(record_id int(11) unsigned not null auto_increment," +
+                handle.execute("create table " + tableNameB + "(record_id serial unique," +
                                "b_column char default 'b'," +
-                               "account_record_id int(11) unsigned not null," +
-                               "tenant_record_id int(11) unsigned default 0," +
+                               "account_record_id bigint /*! unsigned */ not null," +
+                               "tenant_record_id bigint /*! unsigned */ not null default 0," +
                                "primary key(record_id));");
                 handle.execute("insert into " + tableNameA + " (account_record_id, tenant_record_id) values (?, ?)",
                                internalCallContext.getAccountRecordId(), internalCallContext.getTenantRecordId());
@@ -80,8 +80,8 @@ public class TestDatabaseExportDao extends UtilTestSuiteWithEmbeddedDB {
 
         // Verify new dump
         final String newDump = getDump();
-        Assert.assertEquals(newDump, "-- accounts record_id,id,external_key,email,name,first_name_length,currency,billing_cycle_day_local,billing_cycle_day_utc,payment_method_id,time_zone,locale,address1,address2,company_name,city,state_or_province,country,postal_code,phone,migrated,is_notified_for_invoices,created_date,created_by,updated_date,updated_by,tenant_record_id\n" +
-                                     String.format("%s,\"%s\",,%s,%s,%s,,,,,,,,,,,,,,,false,%s,\"%s\",%s,\"%s\",%s,%s", internalCallContext.getAccountRecordId(), accountId, accountEmail, accountName, firstNameLength,
+        Assert.assertEquals(newDump, "-- accounts record_id,id,external_key,email,name,first_name_length,currency,billing_cycle_day_local,payment_method_id,time_zone,locale,address1,address2,company_name,city,state_or_province,country,postal_code,phone,migrated,is_notified_for_invoices,created_date,created_by,updated_date,updated_by,tenant_record_id\n" +
+                                     String.format("%s,\"%s\",,%s,%s,%s,,,,,,,,,,,,,,false,%s,\"%s\",%s,\"%s\",%s,%s", internalCallContext.getAccountRecordId(), accountId, accountEmail, accountName, firstNameLength,
                                                    isNotifiedForInvoices, "1970-05-24T18:33:02.000+0000", createdBy, "1982-02-18T20:03:42.000+0000", updatedBy, internalCallContext.getTenantRecordId()) + "\n" +
                                      "-- " + tableNameA + " record_id,a_column,account_record_id,tenant_record_id\n" +
                                      "1,a," + internalCallContext.getAccountRecordId() + "," + internalCallContext.getTenantRecordId() + "\n" +
