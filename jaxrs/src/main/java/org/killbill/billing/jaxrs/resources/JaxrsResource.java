@@ -117,6 +117,9 @@ public interface JaxrsResource {
 
     public static final String PAGINATION = "pagination";
 
+    public static final String ADMIN = "admin";
+    public static final String ADMIN_PATH = PREFIX + "/" + ADMIN;
+
     public static final String ACCOUNTS = "accounts";
     public static final String ACCOUNTS_PATH = PREFIX + "/" + ACCOUNTS;
 
@@ -219,5 +222,7 @@ public interface JaxrsResource {
     public static final String INVOICE_CATALOG_TRANSLATION = "catalogTranslation";
 
     public static final String UPCOMING_INVOICE_TARGET_DATE = "upcomingInvoiceTargetDate";
+
+    public static final String COMBO = "combo";
 
 }

@@ -89,7 +89,7 @@ from <tableName()> t
 join payment_methods pm on pm.id = t.payment_method_id
 where pm.plugin_name = :pluginName
 order by t.record_id asc
-limit :offset, :rowCount
+limit :rowCount offset :offset
 ;
 >>
 
@@ -102,13 +102,13 @@ where pm.plugin_name = :pluginName
 ;
 >>
 
-getPaymentsByStates(states) ::= <<
+getPaymentsByStatesAcrossTenants(states) ::= <<
 select
 <allTableFields("t.")>
 from <tableName()> t
 where
 created_date >= :createdAfterDate
-and created_date \<= :createdBeforeDate
+and created_date \< :createdBeforeDate
 and state_name in (<states: {state | :state_<i0>}; separator="," >)
 limit :limit
 ;

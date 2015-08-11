@@ -30,13 +30,19 @@ import org.killbill.billing.util.cache.CacheController;
 import org.killbill.billing.util.dao.NonEntityDao;
 import org.killbill.billing.util.dao.NonEntitySqlDao;
 import org.killbill.billing.util.dao.TableName;
+import org.skife.jdbi.v2.Handle;
 
 public class MockNonEntityDao implements NonEntityDao {
 
     private final Map<UUID, Long> tenantRecordIdMappings = new HashMap<UUID, Long>();
+    private final Map<UUID, Long> accountRecordIdMappings = new HashMap<UUID, Long>();
 
     public void addTenantRecordIdMapping(final UUID objectId, final InternalTenantContext context) {
         tenantRecordIdMappings.put(objectId, context.getTenantRecordId());
+    }
+
+    public void addAccountRecordIdMapping(final UUID objectId, final InternalTenantContext context) {
+        accountRecordIdMappings.put(objectId, context.getAccountRecordId());
     }
 
     @Override
@@ -45,7 +51,17 @@ public class MockNonEntityDao implements NonEntityDao {
     }
 
     @Override
+    public Long retrieveRecordIdFromObjectInTransaction(final UUID objectId, final ObjectType objectType, @Nullable final CacheController<Object, Object> cache, @Nullable final Handle handle) {
+        return null;
+    }
+
+    @Override
     public Long retrieveAccountRecordIdFromObject(final UUID objectId, final ObjectType objectType, @Nullable final CacheController<Object, Object> cache) {
+        return accountRecordIdMappings.get(objectId);
+    }
+
+    @Override
+    public Long retrieveAccountRecordIdFromObjectInTransaction(final UUID objectId, final ObjectType objectType, @Nullable final CacheController<Object, Object> cache, @Nullable final Handle handle) {
         return null;
     }
 
@@ -55,17 +71,27 @@ public class MockNonEntityDao implements NonEntityDao {
     }
 
     @Override
+    public Long retrieveTenantRecordIdFromObjectInTransaction(final UUID objectId, final ObjectType objectType, @Nullable final CacheController<Object, Object> cache, @Nullable final Handle handle) {
+        return null;
+    }
+
+    @Override
+    public UUID retrieveIdFromObject(final Long recordId, final ObjectType objectType, @Nullable final CacheController<Object, Object> cache) {
+        return null;
+    }
+
+    @Override
+    public UUID retrieveIdFromObjectInTransaction(final Long recordId, final ObjectType objectType, @Nullable final CacheController<Object, Object> cache, @Nullable final Handle handle) {
+        return null;
+    }
+
+    @Override
     public Long retrieveLastHistoryRecordIdFromTransaction(final Long targetRecordId, final TableName tableName, final NonEntitySqlDao transactional) {
         return null;
     }
 
     @Override
     public Long retrieveHistoryTargetRecordId(final Long recordId, final TableName tableName) {
-        return null;
-    }
-
-    @Override
-    public UUID retrieveIdFromObject(final Long recordId, final ObjectType objectType, final CacheController<Object, Object> cache) {
         return null;
     }
 }

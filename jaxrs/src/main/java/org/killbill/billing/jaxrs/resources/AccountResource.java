@@ -86,6 +86,7 @@ import org.killbill.billing.payment.api.PaymentMethod;
 import org.killbill.billing.payment.api.PaymentOptions;
 import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionType;
+import org.killbill.billing.util.UUIDs;
 import org.killbill.billing.util.api.AuditLevel;
 import org.killbill.billing.util.api.AuditUserApi;
 import org.killbill.billing.util.api.CustomFieldApiException;
@@ -303,9 +304,6 @@ public class AccountResource extends JaxRsResourceBase {
                                   @javax.ws.rs.core.Context final HttpServletRequest request,
                                   @javax.ws.rs.core.Context final UriInfo uriInfo) throws AccountApiException {
         verifyNonNullOrEmpty(json, "AccountJson body should be specified");
-        // Permit blank values, see https://github.com/killbill/killbill/issues/270
-        verifyNonNull(json.getName(), "AccountJson name needs to be set");
-        verifyNonNull(json.getEmail(), "AccountJson email needs to be set");
 
         final AccountData data = json.toAccountData();
         final Account account = accountUserApi.createAccount(data, context.createContext(createdBy, reason, comment, request));
@@ -969,7 +967,7 @@ public class AccountResource extends JaxRsResourceBase {
                                                                           )
                                                     .orNull();
         if (existingEmail == null) {
-            accountUserApi.addEmail(accountId, json.toAccountEmail(UUID.randomUUID()), callContext);
+            accountUserApi.addEmail(accountId, json.toAccountEmail(UUIDs.randomUUID()), callContext);
         }
 
         return uriBuilder.buildResponse(uriInfo, AccountResource.class, "getEmails", json.getAccountId());
