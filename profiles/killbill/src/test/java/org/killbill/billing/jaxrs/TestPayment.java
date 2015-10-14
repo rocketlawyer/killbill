@@ -1,6 +1,6 @@
 /*
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -18,6 +18,7 @@
 package org.killbill.billing.jaxrs;
 
 import java.math.BigDecimal;
+import java.util.Map;
 import java.util.UUID;
 
 import javax.annotation.Nullable;
@@ -31,15 +32,50 @@ import org.killbill.billing.client.model.PaymentMethodPluginDetail;
 import org.killbill.billing.client.model.PaymentTransaction;
 import org.killbill.billing.client.model.Payments;
 import org.killbill.billing.client.model.PluginProperty;
-import org.killbill.billing.jaxrs.json.PluginPropertyJson;
+import org.killbill.billing.osgi.api.OSGIServiceRegistration;
+import org.killbill.billing.payment.api.TransactionType;
+import org.killbill.billing.payment.plugin.api.PaymentPluginApi;
+import org.killbill.billing.payment.plugin.api.PaymentPluginStatus;
+import org.killbill.billing.payment.provider.MockPaymentProviderPlugin;
 import org.testng.Assert;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.inject.Inject;
+
+import static org.testng.Assert.assertEquals;
 
 public class TestPayment extends TestJaxrsBase {
+
+    @Inject
+    protected OSGIServiceRegistration<PaymentPluginApi> registry;
+
+    private MockPaymentProviderPlugin mockPaymentProviderPlugin;
+
+    @BeforeMethod(groups = "slow")
+    public void beforeMethod() throws Exception {
+        super.beforeMethod();
+        mockPaymentProviderPlugin = (MockPaymentProviderPlugin) registry.getServiceForName(PLUGIN_NAME);
+        mockPaymentProviderPlugin.clear();
+    }
+
+    @Test(groups = "slow")
+    public void testWithFailedPayment() throws Exception {
+        final Account account = createAccountWithDefaultPaymentMethod();
+
+        mockPaymentProviderPlugin.makeNextPaymentFailWithError();
+
+        final PaymentTransaction authTransaction = new PaymentTransaction();
+        authTransaction.setAmount(BigDecimal.ONE);
+        authTransaction.setCurrency(account.getCurrency());
+        authTransaction.setTransactionType(TransactionType.AUTHORIZE.name());
+        final Payment payment = killBillClient.createPayment(account.getAccountId(), account.getPaymentMethodId(), authTransaction, ImmutableMap.<String, String>of(), createdBy, reason, comment);
+        assertEquals(payment.getTransactions().get(0).getGatewayErrorCode(), MockPaymentProviderPlugin.GATEWAY_ERROR_CODE);
+        assertEquals(payment.getTransactions().get(0).getGatewayErrorMsg(), MockPaymentProviderPlugin.GATEWAY_ERROR);
+    }
 
     @Test(groups = "slow")
     public void testCreateRetrievePayment() throws Exception {
@@ -49,6 +85,113 @@ public class TestPayment extends TestJaxrsBase {
         final PaymentMethod paymentMethodJson = new PaymentMethod(null, UUID.randomUUID().toString(), account.getAccountId(), false, PLUGIN_NAME, new PaymentMethodPluginDetail());
         final PaymentMethod nonDefaultPaymentMethod = killBillClient.createPaymentMethod(paymentMethodJson, createdBy, reason, comment);
         testCreateRetrievePayment(account, nonDefaultPaymentMethod.getPaymentMethodId(), UUID.randomUUID().toString(), 2);
+    }
+
+    @Test(groups = "slow")
+    public void testCompletionForInitialTransaction() throws Exception {
+        final Account account = createAccountWithDefaultPaymentMethod();
+        final UUID paymentMethodId = account.getPaymentMethodId();
+        final BigDecimal amount = BigDecimal.TEN;
+
+        final String pending = PaymentPluginStatus.PENDING.toString();
+        final ImmutableMap<String, String> pluginProperties = ImmutableMap.<String, String>of(MockPaymentProviderPlugin.PLUGIN_PROPERTY_PAYMENT_PLUGIN_STATUS_OVERRIDE, pending);
+
+        int paymentNb = 0;
+        for (final TransactionType transactionType : ImmutableList.<TransactionType>of(TransactionType.AUTHORIZE, TransactionType.PURCHASE, TransactionType.CREDIT)) {
+            final BigDecimal authAmount = BigDecimal.ZERO;
+            final String paymentExternalKey = UUID.randomUUID().toString();
+            final String authTransactionExternalKey = UUID.randomUUID().toString();
+            paymentNb++;
+
+            final Payment initialPayment = createVerifyTransaction(account, paymentMethodId, paymentExternalKey, authTransactionExternalKey, transactionType, pending, amount, authAmount, pluginProperties, paymentNb);
+            final PaymentTransaction authPaymentTransaction = initialPayment.getTransactions().get(0);
+
+            // Complete operation: first, only specify the payment id
+            final PaymentTransaction completeTransactionByPaymentId = new PaymentTransaction();
+            completeTransactionByPaymentId.setPaymentId(initialPayment.getPaymentId());
+            final Payment completedPaymentByPaymentId = killBillClient.completePayment(completeTransactionByPaymentId, pluginProperties, createdBy, reason, comment);
+            verifyPayment(account, paymentMethodId, completedPaymentByPaymentId, paymentExternalKey, authTransactionExternalKey, transactionType.toString(), pending, amount, authAmount, BigDecimal.ZERO, BigDecimal.ZERO, 1, paymentNb);
+
+            // Second, only specify the payment external key
+            final PaymentTransaction completeTransactionByPaymentExternalKey = new PaymentTransaction();
+            completeTransactionByPaymentExternalKey.setPaymentExternalKey(initialPayment.getPaymentExternalKey());
+            final Payment completedPaymentByExternalKey = killBillClient.completePayment(completeTransactionByPaymentExternalKey, pluginProperties, createdBy, reason, comment);
+            verifyPayment(account, paymentMethodId, completedPaymentByExternalKey, paymentExternalKey, authTransactionExternalKey, transactionType.toString(), pending, amount, authAmount, BigDecimal.ZERO, BigDecimal.ZERO, 1, paymentNb);
+
+            // Third, specify the payment id and transaction external key
+            final PaymentTransaction completeTransactionWithTypeAndKey = new PaymentTransaction();
+            completeTransactionWithTypeAndKey.setPaymentId(initialPayment.getPaymentId());
+            completeTransactionWithTypeAndKey.setTransactionExternalKey(authPaymentTransaction.getTransactionExternalKey());
+            final Payment completedPaymentByTypeAndKey = killBillClient.completePayment(completeTransactionWithTypeAndKey, pluginProperties, createdBy, reason, comment);
+            verifyPayment(account, paymentMethodId, completedPaymentByTypeAndKey, paymentExternalKey, authTransactionExternalKey, transactionType.toString(), pending, amount, authAmount, BigDecimal.ZERO, BigDecimal.ZERO, 1, paymentNb);
+
+            // Finally, specify the payment id and transaction id
+            final PaymentTransaction completeTransactionWithTypeAndId = new PaymentTransaction();
+            completeTransactionWithTypeAndId.setPaymentId(initialPayment.getPaymentId());
+            completeTransactionWithTypeAndId.setTransactionId(authPaymentTransaction.getTransactionId());
+            final Payment completedPaymentByTypeAndId = killBillClient.completePayment(completeTransactionWithTypeAndId, pluginProperties, createdBy, reason, comment);
+            verifyPayment(account, paymentMethodId, completedPaymentByTypeAndId, paymentExternalKey, authTransactionExternalKey, transactionType.toString(), pending, amount, authAmount, BigDecimal.ZERO, BigDecimal.ZERO, 1, paymentNb);
+        }
+    }
+
+    @Test(groups = "slow")
+    public void testCompletionForSubsequentTransaction() throws Exception {
+        final Account account = createAccountWithDefaultPaymentMethod();
+        final UUID paymentMethodId = account.getPaymentMethodId();
+        final String paymentExternalKey = UUID.randomUUID().toString();
+        final String purchaseTransactionExternalKey = UUID.randomUUID().toString();
+        final BigDecimal purchaseAmount = BigDecimal.TEN;
+
+        // Create a successful purchase
+        final Payment authPayment = createVerifyTransaction(account, paymentMethodId, paymentExternalKey, purchaseTransactionExternalKey, TransactionType.PURCHASE,
+                                                            "SUCCESS", purchaseAmount, BigDecimal.ZERO, ImmutableMap.<String, String>of(), 1);
+
+        final String pending = PaymentPluginStatus.PENDING.toString();
+        final ImmutableMap<String, String> pluginProperties = ImmutableMap.<String, String>of(MockPaymentProviderPlugin.PLUGIN_PROPERTY_PAYMENT_PLUGIN_STATUS_OVERRIDE, pending);
+
+        // Trigger a pending refund
+        final String refundTransactionExternalKey = UUID.randomUUID().toString();
+        final PaymentTransaction refundTransaction = new PaymentTransaction();
+        refundTransaction.setPaymentId(authPayment.getPaymentId());
+        refundTransaction.setTransactionExternalKey(refundTransactionExternalKey);
+        refundTransaction.setAmount(purchaseAmount);
+        refundTransaction.setCurrency(authPayment.getCurrency());
+        final Payment refundPayment = killBillClient.refundPayment(refundTransaction, pluginProperties, createdBy, reason, comment);
+        verifyPaymentWithPendingRefund(account, paymentMethodId, paymentExternalKey, purchaseTransactionExternalKey, purchaseAmount, refundTransactionExternalKey, refundPayment);
+
+        // We cannot complete using just the payment id as JAX-RS doesn't know which transaction to complete
+        try {
+            final PaymentTransaction completeTransactionByPaymentId = new PaymentTransaction();
+            completeTransactionByPaymentId.setPaymentId(refundPayment.getPaymentId());
+            killBillClient.completePayment(completeTransactionByPaymentId, pluginProperties, createdBy, reason, comment);
+            Assert.fail();
+        } catch (final KillBillClientException e) {
+            assertEquals(e.getMessage(), "PaymentTransactionJson transactionType and externalKey need to be set");
+        }
+
+        // We cannot complete using just the payment external key as JAX-RS doesn't know which transaction to complete
+        try {
+            final PaymentTransaction completeTransactionByPaymentExternalKey = new PaymentTransaction();
+            completeTransactionByPaymentExternalKey.setPaymentExternalKey(refundPayment.getPaymentExternalKey());
+            killBillClient.completePayment(completeTransactionByPaymentExternalKey, pluginProperties, createdBy, reason, comment);
+            Assert.fail();
+        } catch (final KillBillClientException e) {
+            assertEquals(e.getMessage(), "PaymentTransactionJson transactionType and externalKey need to be set");
+        }
+
+        // Finally, it should work if we specify the payment id and transaction external key
+        final PaymentTransaction completeTransactionWithTypeAndKey = new PaymentTransaction();
+        completeTransactionWithTypeAndKey.setPaymentId(refundPayment.getPaymentId());
+        completeTransactionWithTypeAndKey.setTransactionExternalKey(refundTransactionExternalKey);
+        final Payment completedPaymentByTypeAndKey = killBillClient.completePayment(completeTransactionWithTypeAndKey, pluginProperties, createdBy, reason, comment);
+        verifyPaymentWithPendingRefund(account, paymentMethodId, paymentExternalKey, purchaseTransactionExternalKey, purchaseAmount, refundTransactionExternalKey, completedPaymentByTypeAndKey);
+
+        // Also, it should work if we specify the payment id and transaction id
+        final PaymentTransaction completeTransactionWithTypeAndId = new PaymentTransaction();
+        completeTransactionWithTypeAndId.setPaymentId(refundPayment.getPaymentId());
+        completeTransactionWithTypeAndId.setTransactionId(refundPayment.getTransactions().get(1).getTransactionId());
+        final Payment completedPaymentByTypeAndId = killBillClient.completePayment(completeTransactionWithTypeAndId, pluginProperties, createdBy, reason, comment);
+        verifyPaymentWithPendingRefund(account, paymentMethodId, paymentExternalKey, purchaseTransactionExternalKey, purchaseAmount, refundTransactionExternalKey, completedPaymentByTypeAndId);
     }
 
     @Test(groups = "slow")
@@ -74,33 +217,39 @@ public class TestPayment extends TestJaxrsBase {
         final ComboPaymentTransaction comboPaymentTransaction = new ComboPaymentTransaction(accountJson, paymentMethodJson, authTransactionJson, ImmutableList.<PluginProperty>of(), ImmutableList.<PluginProperty>of());
 
         final Payment payment = killBillClient.createPayment(comboPaymentTransaction, ImmutableMap.<String, String>of(), createdBy, reason, comment);
-        verifyComboPayment(payment, paymentExternalKey,
-                           BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.ZERO, 1, 1);
-
+        verifyComboPayment(payment, paymentExternalKey, BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.ZERO, 1, 1);
 
         // Void payment using externalKey
         final String voidTransactionExternalKey = UUID.randomUUID().toString();
         final Payment voidPayment = killBillClient.voidPayment(null, paymentExternalKey, voidTransactionExternalKey, ImmutableMap.<String, String>of(), createdBy, reason, comment);
-        verifyPaymentTransaction(voidPayment.getPaymentId(), voidPayment.getTransactions().get(1),
-                                 paymentExternalKey, voidTransactionExternalKey,
-                                 accountJson, null, "VOID");
+        verifyPaymentTransaction(accountJson, voidPayment.getPaymentId(), paymentExternalKey, voidPayment.getTransactions().get(1),
+                                 voidTransactionExternalKey, null, "VOID", "SUCCESS");
+    }
 
+    @Test(groups = "slow")
+    public void testComboAuthorizationInvalidPaymentMethod() throws Exception {
+        final Account accountJson = getAccount();
+        accountJson.setAccountId(null);
 
+        final PaymentMethodPluginDetail info = new PaymentMethodPluginDetail();
+        info.setProperties(null);
+
+        final UUID paymentMethodId = UUID.randomUUID();
+        final PaymentMethod paymentMethodJson = new PaymentMethod(paymentMethodId, null, null, true, PLUGIN_NAME, info);
+
+        final ComboPaymentTransaction comboPaymentTransaction = new ComboPaymentTransaction(accountJson, paymentMethodJson, null, ImmutableList.<PluginProperty>of(), ImmutableList.<PluginProperty>of());
+
+        final Payment payment = killBillClient.createPayment(comboPaymentTransaction, ImmutableMap.<String, String>of(), createdBy, reason, comment);
+        // Client returns null in case of a 404
+        Assert.assertNull(payment);
     }
 
     private void testCreateRetrievePayment(final Account account, @Nullable final UUID paymentMethodId,
-                                          final String PaymentExternalKey, final int PaymentNb) throws Exception {
+                                           final String paymentExternalKey, final int paymentNb) throws Exception {
         // Authorization
         final String authTransactionExternalKey = UUID.randomUUID().toString();
-        final PaymentTransaction authTransaction = new PaymentTransaction();
-        authTransaction.setAmount(BigDecimal.TEN);
-        authTransaction.setCurrency(account.getCurrency());
-        authTransaction.setPaymentExternalKey(PaymentExternalKey);
-        authTransaction.setTransactionExternalKey(authTransactionExternalKey);
-        authTransaction.setTransactionType("AUTHORIZE");
-        final Payment authPayment = killBillClient.createPayment(account.getAccountId(), paymentMethodId, authTransaction, createdBy, reason, comment);
-        verifyPayment(account, paymentMethodId, authPayment, PaymentExternalKey, authTransactionExternalKey,
-                      BigDecimal.TEN, BigDecimal.ZERO, BigDecimal.ZERO, 1, PaymentNb);
+        final Payment authPayment = createVerifyTransaction(account, paymentMethodId, paymentExternalKey, authTransactionExternalKey, TransactionType.AUTHORIZE,
+                                                            "SUCCESS", BigDecimal.TEN, BigDecimal.TEN, ImmutableMap.<String, String>of(), paymentNb);
 
         // Capture 1
         final String capture1TransactionExternalKey = UUID.randomUUID().toString();
@@ -108,15 +257,14 @@ public class TestPayment extends TestJaxrsBase {
         captureTransaction.setPaymentId(authPayment.getPaymentId());
         captureTransaction.setAmount(BigDecimal.ONE);
         captureTransaction.setCurrency(account.getCurrency());
-        captureTransaction.setPaymentExternalKey(PaymentExternalKey);
+        captureTransaction.setPaymentExternalKey(paymentExternalKey);
         captureTransaction.setTransactionExternalKey(capture1TransactionExternalKey);
         // captureAuthorization is using paymentId
         final Payment capturedPayment1 = killBillClient.captureAuthorization(captureTransaction, createdBy, reason, comment);
-        verifyPayment(account, paymentMethodId, capturedPayment1, PaymentExternalKey, authTransactionExternalKey,
-                      BigDecimal.TEN, BigDecimal.ONE, BigDecimal.ZERO, 2, PaymentNb);
-        verifyPaymentTransaction(authPayment.getPaymentId(), capturedPayment1.getTransactions().get(1),
-                                 PaymentExternalKey, capture1TransactionExternalKey,
-                                 account, captureTransaction.getAmount(), "CAPTURE");
+        verifyPayment(account, paymentMethodId, capturedPayment1, paymentExternalKey, authTransactionExternalKey, "AUTHORIZE", "SUCCESS",
+                      BigDecimal.TEN, BigDecimal.TEN, BigDecimal.ONE, BigDecimal.ZERO, 2, paymentNb);
+        verifyPaymentTransaction(account, authPayment.getPaymentId(), paymentExternalKey, capturedPayment1.getTransactions().get(1),
+                                 capture1TransactionExternalKey, captureTransaction.getAmount(), "CAPTURE", "SUCCESS");
 
         // Capture 2
         final String capture2TransactionExternalKey = UUID.randomUUID().toString();
@@ -124,11 +272,10 @@ public class TestPayment extends TestJaxrsBase {
         // captureAuthorization is using externalKey
         captureTransaction.setPaymentId(null);
         final Payment capturedPayment2 = killBillClient.captureAuthorization(captureTransaction, createdBy, reason, comment);
-        verifyPayment(account, paymentMethodId, capturedPayment2, PaymentExternalKey, authTransactionExternalKey,
-                      BigDecimal.TEN, new BigDecimal("2"), BigDecimal.ZERO, 3, PaymentNb);
-        verifyPaymentTransaction(authPayment.getPaymentId(), capturedPayment2.getTransactions().get(2),
-                                 PaymentExternalKey, capture2TransactionExternalKey,
-                                 account, captureTransaction.getAmount(), "CAPTURE");
+        verifyPayment(account, paymentMethodId, capturedPayment2, paymentExternalKey, authTransactionExternalKey, "AUTHORIZE", "SUCCESS",
+                      BigDecimal.TEN, BigDecimal.TEN, new BigDecimal("2"), BigDecimal.ZERO, 3, paymentNb);
+        verifyPaymentTransaction(account, authPayment.getPaymentId(), paymentExternalKey, capturedPayment2.getTransactions().get(2),
+                                 capture2TransactionExternalKey, captureTransaction.getAmount(), "CAPTURE", "SUCCESS");
 
         // Refund
         final String refundTransactionExternalKey = UUID.randomUUID().toString();
@@ -136,44 +283,36 @@ public class TestPayment extends TestJaxrsBase {
         refundTransaction.setPaymentId(authPayment.getPaymentId());
         refundTransaction.setAmount(new BigDecimal("2"));
         refundTransaction.setCurrency(account.getCurrency());
-        refundTransaction.setPaymentExternalKey(PaymentExternalKey);
+        refundTransaction.setPaymentExternalKey(paymentExternalKey);
         refundTransaction.setTransactionExternalKey(refundTransactionExternalKey);
         final Payment refundPayment = killBillClient.refundPayment(refundTransaction, createdBy, reason, comment);
-        verifyPayment(account, paymentMethodId, refundPayment, PaymentExternalKey, authTransactionExternalKey,
-                      BigDecimal.TEN, new BigDecimal("2"), new BigDecimal("2"), 4, PaymentNb);
-        verifyPaymentTransaction(authPayment.getPaymentId(), refundPayment.getTransactions().get(3),
-                                 PaymentExternalKey, refundTransactionExternalKey,
-                                 account, refundTransaction.getAmount(), "REFUND");
+        verifyPayment(account, paymentMethodId, refundPayment, paymentExternalKey, authTransactionExternalKey, "AUTHORIZE", "SUCCESS",
+                      BigDecimal.TEN, BigDecimal.TEN, new BigDecimal("2"), new BigDecimal("2"), 4, paymentNb);
+        verifyPaymentTransaction(account, authPayment.getPaymentId(), paymentExternalKey, refundPayment.getTransactions().get(3),
+                                 refundTransactionExternalKey, refundTransaction.getAmount(), "REFUND", "SUCCESS");
     }
 
-    private void verifyPayment(final Account account, @Nullable final UUID paymentMethodId, final Payment Payment,
-                               final String PaymentExternalKey, final String authTransactionExternalKey,
-                               final BigDecimal authAmount, final BigDecimal capturedAmount,
-                               final BigDecimal refundedAmount, final int nbTransactions, final int PaymentNb) throws KillBillClientException {
-        Assert.assertEquals(Payment.getAccountId(), account.getAccountId());
-        Assert.assertEquals(Payment.getPaymentMethodId(), Objects.firstNonNull(paymentMethodId, account.getPaymentMethodId()));
-        Assert.assertNotNull(Payment.getPaymentId());
-        Assert.assertNotNull(Payment.getPaymentNumber());
-        Assert.assertEquals(Payment.getPaymentExternalKey(), PaymentExternalKey);
-        Assert.assertEquals(Payment.getAuthAmount().compareTo(authAmount), 0);
-        Assert.assertEquals(Payment.getCapturedAmount().compareTo(capturedAmount), 0);
-        Assert.assertEquals(Payment.getRefundedAmount().compareTo(refundedAmount), 0);
-        Assert.assertEquals(Payment.getCurrency(), account.getCurrency());
-        Assert.assertEquals(Payment.getTransactions().size(), nbTransactions);
+    private Payment createVerifyTransaction(final Account account,
+                                            @Nullable final UUID paymentMethodId,
+                                            final String paymentExternalKey,
+                                            final String transactionExternalKey,
+                                            final TransactionType transactionType,
+                                            final String transactionStatus,
+                                            final BigDecimal transactionAmount,
+                                            final BigDecimal authAmount,
+                                            final Map<String, String> pluginProperties,
+                                            final int paymentNb) throws KillBillClientException {
+        final PaymentTransaction authTransaction = new PaymentTransaction();
+        authTransaction.setAmount(transactionAmount);
+        authTransaction.setCurrency(account.getCurrency());
+        authTransaction.setPaymentExternalKey(paymentExternalKey);
+        authTransaction.setTransactionExternalKey(transactionExternalKey);
+        authTransaction.setTransactionType(transactionType.toString());
+        final Payment payment = killBillClient.createPayment(account.getAccountId(), paymentMethodId, authTransaction, pluginProperties, createdBy, reason, comment);
 
-        verifyPaymentTransaction(Payment.getPaymentId(), Payment.getTransactions().get(0),
-                                 PaymentExternalKey, authTransactionExternalKey, account, authAmount, "AUTHORIZE");
+        verifyPayment(account, paymentMethodId, payment, paymentExternalKey, transactionExternalKey, transactionType.toString(), transactionStatus, transactionAmount, authAmount, BigDecimal.ZERO, BigDecimal.ZERO, 1, paymentNb);
 
-        final Payments Payments = killBillClient.getPayments();
-        Assert.assertEquals(Payments.size(), PaymentNb);
-        Assert.assertEquals(Payments.get(PaymentNb - 1), Payment);
-
-        final Payment retrievedPayment = killBillClient.getPayment(Payment.getPaymentId());
-        Assert.assertEquals(retrievedPayment, Payment);
-
-        final Payments paymentsForAccount = killBillClient.getPaymentsForAccount(account.getAccountId());
-        Assert.assertEquals(paymentsForAccount.size(), PaymentNb);
-        Assert.assertEquals(paymentsForAccount.get(PaymentNb - 1), Payment);
+        return payment;
     }
 
     private void verifyComboPayment(final Payment payment,
@@ -182,36 +321,93 @@ public class TestPayment extends TestJaxrsBase {
                                     final BigDecimal capturedAmount,
                                     final BigDecimal refundedAmount,
                                     final int nbTransactions,
-                                    final int PaymentNb) throws KillBillClientException {
-
+                                    final int paymentNb) throws KillBillClientException {
         Assert.assertNotNull(payment.getPaymentNumber());
-        Assert.assertEquals(payment.getPaymentExternalKey(), paymentExternalKey);
-        Assert.assertEquals(payment.getAuthAmount().compareTo(authAmount), 0);
-        Assert.assertEquals(payment.getCapturedAmount().compareTo(capturedAmount), 0);
-        Assert.assertEquals(payment.getRefundedAmount().compareTo(refundedAmount), 0);
-        Assert.assertEquals(payment.getTransactions().size(), nbTransactions);
+        assertEquals(payment.getPaymentExternalKey(), paymentExternalKey);
+        assertEquals(payment.getAuthAmount().compareTo(authAmount), 0);
+        assertEquals(payment.getCapturedAmount().compareTo(capturedAmount), 0);
+        assertEquals(payment.getRefundedAmount().compareTo(refundedAmount), 0);
+        assertEquals(payment.getTransactions().size(), nbTransactions);
 
         final Payments Payments = killBillClient.getPayments();
-        Assert.assertEquals(Payments.size(), PaymentNb);
-        Assert.assertEquals(Payments.get(PaymentNb - 1), payment);
-
+        assertEquals(Payments.size(), paymentNb);
+        assertEquals(Payments.get(paymentNb - 1), payment);
     }
 
-    private void verifyPaymentTransaction(final UUID PaymentId, final PaymentTransaction PaymentTransaction,
-                                          final String PaymentExternalKey, final String TransactionExternalKey,
-                                          final Account account, @Nullable final BigDecimal amount, final String transactionType) {
-        Assert.assertEquals(PaymentTransaction.getPaymentId(), PaymentId);
-        Assert.assertNotNull(PaymentTransaction.getTransactionId());
-        Assert.assertEquals(PaymentTransaction.getTransactionType(), transactionType);
-        Assert.assertEquals(PaymentTransaction.getStatus(), "SUCCESS");
+    private void verifyPayment(final Account account,
+                               @Nullable final UUID paymentMethodId,
+                               final Payment payment,
+                               final String paymentExternalKey,
+                               final String firstTransactionExternalKey,
+                               final String firstTransactionType,
+                               final String firstTransactionStatus,
+                               final BigDecimal firstTransactionAmount,
+                               final BigDecimal paymentAuthAmount,
+                               final BigDecimal capturedAmount,
+                               final BigDecimal refundedAmount,
+                               final int nbTransactions,
+                               final int paymentNb) throws KillBillClientException {
+        verifyPaymentNoTransaction(account, paymentMethodId, payment, paymentExternalKey, paymentAuthAmount, capturedAmount, refundedAmount, nbTransactions, paymentNb);
+        verifyPaymentTransaction(account, payment.getPaymentId(), paymentExternalKey, payment.getTransactions().get(0), firstTransactionExternalKey, firstTransactionAmount, firstTransactionType, firstTransactionStatus);
+    }
+
+    private void verifyPaymentNoTransaction(final Account account,
+                                            @Nullable final UUID paymentMethodId,
+                                            final Payment payment,
+                                            final String paymentExternalKey,
+                                            final BigDecimal authAmount,
+                                            final BigDecimal capturedAmount,
+                                            final BigDecimal refundedAmount,
+                                            final int nbTransactions,
+                                            final int paymentNb) throws KillBillClientException {
+        assertEquals(payment.getAccountId(), account.getAccountId());
+        assertEquals(payment.getPaymentMethodId(), MoreObjects.firstNonNull(paymentMethodId, account.getPaymentMethodId()));
+        Assert.assertNotNull(payment.getPaymentId());
+        Assert.assertNotNull(payment.getPaymentNumber());
+        assertEquals(payment.getPaymentExternalKey(), paymentExternalKey);
+        assertEquals(payment.getAuthAmount().compareTo(authAmount), 0);
+        assertEquals(payment.getCapturedAmount().compareTo(capturedAmount), 0);
+        assertEquals(payment.getRefundedAmount().compareTo(refundedAmount), 0);
+        assertEquals(payment.getCurrency(), account.getCurrency());
+        assertEquals(payment.getTransactions().size(), nbTransactions);
+
+        final Payments Payments = killBillClient.getPayments();
+        assertEquals(Payments.size(), paymentNb);
+        assertEquals(Payments.get(paymentNb - 1), payment);
+
+        final Payment retrievedPayment = killBillClient.getPayment(payment.getPaymentId());
+        assertEquals(retrievedPayment, payment);
+
+        final Payments paymentsForAccount = killBillClient.getPaymentsForAccount(account.getAccountId());
+        assertEquals(paymentsForAccount.size(), paymentNb);
+        assertEquals(paymentsForAccount.get(paymentNb - 1), payment);
+    }
+
+    private void verifyPaymentTransaction(final Account account,
+                                          final UUID paymentId,
+                                          final String paymentExternalKey,
+                                          final PaymentTransaction paymentTransaction,
+                                          final String transactionExternalKey,
+                                          @Nullable final BigDecimal amount,
+                                          final String transactionType,
+                                          final String transactionStatus) {
+        assertEquals(paymentTransaction.getPaymentId(), paymentId);
+        Assert.assertNotNull(paymentTransaction.getTransactionId());
+        assertEquals(paymentTransaction.getTransactionType(), transactionType);
+        assertEquals(paymentTransaction.getStatus(), transactionStatus);
         if (amount == null) {
-            Assert.assertNull(PaymentTransaction.getAmount());
-            Assert.assertNull(PaymentTransaction.getCurrency());
+            Assert.assertNull(paymentTransaction.getAmount());
+            Assert.assertNull(paymentTransaction.getCurrency());
         } else {
-            Assert.assertEquals(PaymentTransaction.getAmount().compareTo(amount), 0);
-            Assert.assertEquals(PaymentTransaction.getCurrency(), account.getCurrency());
+            assertEquals(paymentTransaction.getAmount().compareTo(amount), 0);
+            assertEquals(paymentTransaction.getCurrency(), account.getCurrency());
         }
-        Assert.assertEquals(PaymentTransaction.getTransactionExternalKey(), TransactionExternalKey);
-        Assert.assertEquals(PaymentTransaction.getPaymentExternalKey(), PaymentExternalKey);
+        assertEquals(paymentTransaction.getTransactionExternalKey(), transactionExternalKey);
+        assertEquals(paymentTransaction.getPaymentExternalKey(), paymentExternalKey);
+    }
+
+    private void verifyPaymentWithPendingRefund(final Account account, final UUID paymentMethodId, final String paymentExternalKey, final String authTransactionExternalKey, final BigDecimal purchaseAmount, final String refundTransactionExternalKey, final Payment refundPayment) throws KillBillClientException {
+        verifyPayment(account, paymentMethodId, refundPayment, paymentExternalKey, authTransactionExternalKey, "PURCHASE", "SUCCESS", purchaseAmount, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, 2, 1);
+        verifyPaymentTransaction(account, refundPayment.getPaymentId(), paymentExternalKey, refundPayment.getTransactions().get(1), refundTransactionExternalKey, purchaseAmount, "REFUND", "PENDING");
     }
 }

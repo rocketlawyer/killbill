@@ -1,6 +1,6 @@
 /*
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -17,7 +17,9 @@
 
 package org.killbill.billing.jaxrs.resources;
 
+import java.math.BigDecimal;
 import java.net.URI;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +35,7 @@ import javax.ws.rs.DefaultValue;
 import javax.ws.rs.GET;
 import javax.ws.rs.HeaderParam;
 import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
@@ -46,19 +49,16 @@ import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.account.api.AccountUserApi;
 import org.killbill.billing.catalog.api.Currency;
-import org.killbill.billing.jaxrs.json.AccountJson;
 import org.killbill.billing.jaxrs.json.ComboPaymentTransactionJson;
 import org.killbill.billing.jaxrs.json.PaymentJson;
-import org.killbill.billing.jaxrs.json.PaymentMethodJson;
 import org.killbill.billing.jaxrs.json.PaymentTransactionJson;
-import org.killbill.billing.jaxrs.json.PluginPropertyJson;
 import org.killbill.billing.jaxrs.util.Context;
 import org.killbill.billing.jaxrs.util.JaxrsUriBuilder;
 import org.killbill.billing.payment.api.Payment;
 import org.killbill.billing.payment.api.PaymentApi;
 import org.killbill.billing.payment.api.PaymentApiException;
-import org.killbill.billing.payment.api.PaymentMethod;
 import org.killbill.billing.payment.api.PaymentOptions;
+import org.killbill.billing.payment.api.PaymentTransaction;
 import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.util.api.AuditUserApi;
@@ -72,12 +72,10 @@ import org.killbill.clock.Clock;
 
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.base.Function;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Strings;
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
 import com.wordnik.swagger.annotations.Api;
 import com.wordnik.swagger.annotations.ApiOperation;
 import com.wordnik.swagger.annotations.ApiResponse;
@@ -87,7 +85,7 @@ import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
 @Path(JaxrsResource.PAYMENTS_PATH)
 @Api(value = JaxrsResource.PAYMENTS_PATH, description = "Operations on payments")
-public class PaymentResource extends JaxRsResourceBase {
+public class PaymentResource extends ComboPaymentResource {
 
     @Inject
     public PaymentResource(final JaxrsUriBuilder uriBuilder,
@@ -228,6 +226,150 @@ public class PaymentResource extends JaxRsResourceBase {
                                                 },
                                                 nextPageUri
                                                );
+    }
+
+    @Timed
+    @PUT
+    @Path("/{paymentId:" + UUID_PATTERN + "}")
+    @Consumes(APPLICATION_JSON)
+    @Produces(APPLICATION_JSON)
+    @ApiOperation(value = "Complete an existing transaction")
+    @ApiResponses(value = {@ApiResponse(code = 400, message = "Invalid paymentId supplied"),
+                           @ApiResponse(code = 404, message = "Account or payment not found")})
+    public Response completeTransaction(final PaymentTransactionJson json,
+                                        @PathParam("paymentId") final String paymentIdStr,
+                                        @QueryParam(QUERY_PAYMENT_CONTROL_PLUGIN_NAME) final List<String> paymentControlPluginNames,
+                                        @QueryParam(QUERY_PLUGIN_PROPERTY) final List<String> pluginPropertiesString,
+                                        @HeaderParam(HDR_CREATED_BY) final String createdBy,
+                                        @HeaderParam(HDR_REASON) final String reason,
+                                        @HeaderParam(HDR_COMMENT) final String comment,
+                                        @javax.ws.rs.core.Context final UriInfo uriInfo,
+                                        @javax.ws.rs.core.Context final HttpServletRequest request) throws PaymentApiException, AccountApiException {
+        return completeTransactionInternal(json, paymentIdStr, paymentControlPluginNames, pluginPropertiesString, createdBy, reason, comment, uriInfo, request);
+    }
+
+    @Timed
+    @PUT
+    @Consumes(APPLICATION_JSON)
+    @Produces(APPLICATION_JSON)
+    @ApiOperation(value = "Complete an existing transaction")
+    @ApiResponses(value = {@ApiResponse(code = 404, message = "Account or payment not found")})
+    public Response completeTransactionByExternalKey(final PaymentTransactionJson json,
+                                                     @QueryParam(QUERY_PAYMENT_CONTROL_PLUGIN_NAME) final List<String> paymentControlPluginNames,
+                                                     @QueryParam(QUERY_PLUGIN_PROPERTY) final List<String> pluginPropertiesString,
+                                                     @HeaderParam(HDR_CREATED_BY) final String createdBy,
+                                                     @HeaderParam(HDR_REASON) final String reason,
+                                                     @HeaderParam(HDR_COMMENT) final String comment,
+                                                     @javax.ws.rs.core.Context final UriInfo uriInfo,
+                                                     @javax.ws.rs.core.Context final HttpServletRequest request) throws PaymentApiException, AccountApiException {
+        return completeTransactionInternal(json, null, paymentControlPluginNames, pluginPropertiesString, createdBy, reason, comment, uriInfo, request);
+    }
+
+    private Response completeTransactionInternal(final PaymentTransactionJson json,
+                                                 @Nullable final String paymentIdStr,
+                                                 final List<String> paymentControlPluginNames,
+                                                 final Iterable<String> pluginPropertiesString,
+                                                 final String createdBy,
+                                                 final String reason,
+                                                 final String comment,
+                                                 final UriInfo uriInfo,
+                                                 final HttpServletRequest request) throws PaymentApiException, AccountApiException {
+        final Iterable<PluginProperty> pluginProperties = extractPluginProperties(pluginPropertiesString);
+        final CallContext callContext = context.createContext(createdBy, reason, comment, request);
+        final Payment initialPayment = getPaymentByIdOrKey(paymentIdStr, json == null ? null : json.getPaymentExternalKey(), pluginProperties, callContext);
+
+        final Account account = accountUserApi.getAccountById(initialPayment.getAccountId(), callContext);
+        final BigDecimal amount = json == null ? null : json.getAmount();
+        final Currency currency = json == null || json.getCurrency() == null ? null : Currency.valueOf(json.getCurrency());
+
+        final TransactionType transactionType;
+        final String transactionExternalKey;
+        if (json != null && json.getTransactionId() != null) {
+            final Collection<PaymentTransaction> paymentTransactionCandidates = Collections2.<PaymentTransaction>filter(initialPayment.getTransactions(),
+                                                                                                                        new Predicate<PaymentTransaction>() {
+                                                                                                                            @Override
+                                                                                                                            public boolean apply(final PaymentTransaction input) {
+                                                                                                                                return input.getId().toString().equals(json.getTransactionId());
+                                                                                                                            }
+                                                                                                                        });
+            if (paymentTransactionCandidates.size() == 1) {
+                final PaymentTransaction paymentTransaction = paymentTransactionCandidates.iterator().next();
+                transactionType = paymentTransaction.getTransactionType();
+                transactionExternalKey = paymentTransaction.getExternalKey();
+            } else {
+                return Response.status(Status.NOT_FOUND).build();
+            }
+        } else if (json != null && json.getTransactionExternalKey() != null && json.getTransactionType() != null) {
+            transactionType = TransactionType.valueOf(json.getTransactionType());
+            transactionExternalKey = json.getTransactionExternalKey();
+        } else if (json != null && json.getTransactionExternalKey() != null) {
+            final Collection<PaymentTransaction> paymentTransactionCandidates = Collections2.<PaymentTransaction>filter(initialPayment.getTransactions(),
+                                                                                                                        new Predicate<PaymentTransaction>() {
+                                                                                                                            @Override
+                                                                                                                            public boolean apply(final PaymentTransaction input) {
+                                                                                                                                return input.getExternalKey().equals(json.getTransactionExternalKey());
+                                                                                                                            }
+                                                                                                                        });
+            if (paymentTransactionCandidates.size() == 1) {
+                transactionType = paymentTransactionCandidates.iterator().next().getTransactionType();
+                transactionExternalKey = json.getTransactionExternalKey();
+            } else {
+                // Note: we could bit a bit smarter but keep the logic in the payment system
+                verifyNonNullOrEmpty(null, "PaymentTransactionJson transactionType needs to be set");
+                // Never reached
+                return Response.status(Status.PRECONDITION_FAILED).build();
+            }
+        } else if (json != null && json.getTransactionType() != null) {
+            final Collection<PaymentTransaction> paymentTransactionCandidates = Collections2.<PaymentTransaction>filter(initialPayment.getTransactions(),
+                                                                                                                        new Predicate<PaymentTransaction>() {
+                                                                                                                            @Override
+                                                                                                                            public boolean apply(final PaymentTransaction input) {
+                                                                                                                                return input.getTransactionType().toString().equals(json.getTransactionType());
+                                                                                                                            }
+                                                                                                                        });
+            if (paymentTransactionCandidates.size() == 1) {
+                transactionType = TransactionType.valueOf(json.getTransactionType());
+                transactionExternalKey = paymentTransactionCandidates.iterator().next().getExternalKey();
+            } else {
+                verifyNonNullOrEmpty(null, "PaymentTransactionJson externalKey needs to be set");
+                // Never reached
+                return Response.status(Status.PRECONDITION_FAILED).build();
+            }
+        } else if (initialPayment.getTransactions().size() == 1) {
+            final PaymentTransaction paymentTransaction = initialPayment.getTransactions().get(0);
+            transactionType = paymentTransaction.getTransactionType();
+            transactionExternalKey = paymentTransaction.getExternalKey();
+        } else {
+            verifyNonNullOrEmpty(null, "PaymentTransactionJson transactionType and externalKey need to be set");
+            // Never reached
+            return Response.status(Status.PRECONDITION_FAILED).build();
+        }
+
+        final PaymentOptions paymentOptions = createControlPluginApiPaymentOptions(paymentControlPluginNames);
+        switch (transactionType) {
+            case AUTHORIZE:
+                paymentApi.createAuthorizationWithPaymentControl(account, initialPayment.getPaymentMethodId(), initialPayment.getId(), amount, currency,
+                                                                 initialPayment.getExternalKey(), transactionExternalKey,
+                                                                 pluginProperties, paymentOptions, callContext);
+                break;
+            case PURCHASE:
+                paymentApi.createPurchaseWithPaymentControl(account, initialPayment.getPaymentMethodId(), initialPayment.getId(), amount, currency,
+                                                            initialPayment.getExternalKey(), transactionExternalKey,
+                                                            pluginProperties, paymentOptions, callContext);
+                break;
+            case CREDIT:
+                paymentApi.createCreditWithPaymentControl(account, initialPayment.getPaymentMethodId(), initialPayment.getId(), amount, currency,
+                                                          initialPayment.getExternalKey(), transactionExternalKey,
+                                                          pluginProperties, paymentOptions, callContext);
+                break;
+            case REFUND:
+                paymentApi.createRefundWithPaymentControl(account, initialPayment.getId(), amount, currency,
+                                                          transactionExternalKey, pluginProperties, paymentOptions, callContext);
+                break;
+            default:
+                return Response.status(Status.PRECONDITION_FAILED).entity("TransactionType " + transactionType + " cannot be completed").build();
+        }
+        return uriBuilder.buildResponse(uriInfo, PaymentResource.class, "getPayment", initialPayment.getId());
     }
 
     @Timed
@@ -484,17 +626,7 @@ public class PaymentResource extends JaxRsResourceBase {
         final CallContext callContext = context.createContext(createdBy, reason, comment, request);
         final Account account = getOrCreateAccount(json.getAccount(), callContext);
 
-        final Iterable<PluginProperty> paymentMethodPluginProperties = json.getPaymentMethodPluginProperties() != null ?
-                                                                       Iterables.<PluginPropertyJson, PluginProperty>transform(json.getPaymentMethodPluginProperties(),
-                                                                                                                               new Function<PluginPropertyJson, PluginProperty>() {
-                                                                                                                                   @Override
-                                                                                                                                   public PluginProperty apply(final PluginPropertyJson pluginPropertyJson) {
-                                                                                                                                       return pluginPropertyJson.toPluginProperty();
-                                                                                                                                   }
-                                                                                                                               }
-                                                                                                                              ) :
-                                                                       ImmutableList.<PluginProperty>of();
-
+        final Iterable<PluginProperty> paymentMethodPluginProperties = extractPluginProperties(json.getPaymentMethodPluginProperties());
         final UUID paymentMethodId = getOrCreatePaymentMethod(account, json.getPaymentMethod(), paymentMethodPluginProperties, callContext);
 
         final PaymentTransactionJson paymentTransactionJson = json.getTransaction();
@@ -502,16 +634,7 @@ public class PaymentResource extends JaxRsResourceBase {
         final PaymentOptions paymentOptions = createControlPluginApiPaymentOptions(paymentControlPluginNames);
         final Payment result;
 
-        final Iterable<PluginProperty> transactionPluginProperties = json.getTransactionPluginProperties() != null ?
-                                                                     Iterables.<PluginPropertyJson, PluginProperty>transform(json.getTransactionPluginProperties(),
-                                                                                                                             new Function<PluginPropertyJson, PluginProperty>() {
-                                                                                                                                 @Override
-                                                                                                                                 public PluginProperty apply(final PluginPropertyJson pluginPropertyJson) {
-                                                                                                                                     return pluginPropertyJson.toPluginProperty();
-                                                                                                                                 }
-                                                                                                                             }
-                                                                                                                            ) :
-                                                                     ImmutableList.<PluginProperty>of();
+        final Iterable<PluginProperty> transactionPluginProperties = extractPluginProperties(json.getTransactionPluginProperties());
 
         final Currency currency = paymentTransactionJson.getCurrency() == null ? account.getCurrency() : Currency.valueOf(paymentTransactionJson.getCurrency());
         final UUID paymentId = null; // If we need to specify a paymentId (e.g 3DS authorization, we can use regular API, no need for combo call)
@@ -541,70 +664,4 @@ public class PaymentResource extends JaxRsResourceBase {
     protected ObjectType getObjectType() {
         return ObjectType.PAYMENT;
     }
-
-    private Account getOrCreateAccount(final AccountJson accountJson, final CallContext callContext) throws AccountApiException {
-        // Attempt to retrieve by accountId if specified
-        if (accountJson.getAccountId() != null) {
-            return accountUserApi.getAccountById(UUID.fromString(accountJson.getAccountId()), callContext);
-        }
-
-        if (accountJson.getExternalKey() != null) {
-            // Attempt to retrieve by account externalKey, ignore if does not exist so we can create it with the key specified.
-            try {
-                return accountUserApi.getAccountByKey(accountJson.getExternalKey(), callContext);
-            } catch (final AccountApiException ignore) {}
-        }
-        // Finally create if does not exist
-        return accountUserApi.createAccount(accountJson.toAccountData(), callContext);
-    }
-
-    private UUID getOrCreatePaymentMethod(final Account account, final PaymentMethodJson paymentMethodJson, final Iterable<PluginProperty> pluginProperties, final CallContext callContext) throws PaymentApiException {
-
-        // Get all payment methods for account
-        final List<PaymentMethod> accountPaymentMethods = paymentApi.getAccountPaymentMethods(account.getId(), false, ImmutableList.<PluginProperty>of(), callContext);
-
-        // If we were specified a paymentMethod id and we find it, we return it
-        if (paymentMethodJson.getPaymentMethodId() != null) {
-            final UUID match = UUID.fromString(paymentMethodJson.getPaymentMethodId());
-            if (Iterables.any(accountPaymentMethods, new Predicate<PaymentMethod>() {
-                @Override
-                public boolean apply(final PaymentMethod input) {
-                    return input.getId().equals(match);
-                }
-            })) {
-                return match;
-            }
-        }
-
-        // If we were specified a paymentMethod externalKey and we find it, we return it
-        if (paymentMethodJson.getExternalKey() != null) {
-            final PaymentMethod match = Iterables.tryFind(accountPaymentMethods, new Predicate<PaymentMethod>() {
-                @Override
-                public boolean apply(final PaymentMethod input) {
-                    return input.getExternalKey().equals(paymentMethodJson.getExternalKey());
-                }
-            }).orNull();
-            if (match != null) {
-                return match.getId();
-            }
-        }
-
-        // Only set as default if this is the first paymentMethod on the account
-        final boolean isDefault = accountPaymentMethods.isEmpty();
-        final PaymentMethod paymentData = paymentMethodJson.toPaymentMethod(account.getId().toString());
-        return paymentApi.addPaymentMethod(account, paymentMethodJson.getExternalKey(), paymentMethodJson.getPluginName(), isDefault,
-                                           paymentData.getPluginDetail(), pluginProperties, callContext);
-    }
-
-    private Payment getPaymentByIdOrKey(@Nullable final String paymentIdStr, @Nullable final String externalKey, final Iterable<PluginProperty> pluginProperties, final TenantContext tenantContext) throws PaymentApiException {
-
-        Preconditions.checkArgument(paymentIdStr != null || externalKey != null, "Need to set either paymentId or payment externalKey");
-        if (paymentIdStr != null) {
-            final UUID paymentId = UUID.fromString(paymentIdStr);
-            return paymentApi.getPayment(paymentId, false, pluginProperties, tenantContext);
-        } else {
-            return paymentApi.getPaymentByExternalKey(externalKey, false, pluginProperties, tenantContext);
-        }
-    }
-
 }

@@ -28,6 +28,7 @@ import org.killbill.billing.jaxrs.util.KillbillEventHandler;
 import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.platform.config.DefaultKillbillConfigSource;
 import org.killbill.billing.server.filters.ProfilingContainerResponseFilter;
+import org.killbill.billing.server.filters.RequestDataFilter;
 import org.killbill.billing.server.filters.ResponseCorsFilter;
 import org.killbill.billing.server.modules.KillbillServerModule;
 import org.killbill.billing.server.security.TenantFilter;
@@ -41,6 +42,7 @@ import ch.qos.logback.classic.LoggerContext;
 import com.google.common.collect.ImmutableMap;
 import com.google.inject.Module;
 import com.google.inject.servlet.ServletModule;
+import com.sun.jersey.api.container.filter.GZIPContentEncodingFilter;
 import com.wordnik.swagger.jaxrs.config.BeanConfig;
 
 public class KillbillGuiceListener extends KillbillPlatformGuiceListener {
@@ -70,9 +72,14 @@ public class KillbillGuiceListener extends KillbillPlatformGuiceListener {
         // c.s.j.s.w.g.AbstractWadlGeneratorGrammarGenerator - Couldn't find grammar element for class javax.ws.rs.core.Response
         builder.addJerseyParam("com.sun.jersey.config.feature.DisableWADL", "true");
 
-        // The logging filter is still incompatible with the GZIP filter
-        //builder.addJerseyFilter(GZIPContentEncodingFilter.class.getName());
+        // In order to use the GZIPContentEncodingFilter, the jersey param "com.sun.jersey.config.feature.logging.DisableEntitylogging"
+        // must not be set to false.
+        if (config.isConfiguredToReturnGZIPResponses()) {
+            logger.info("Enable http gzip responses");
+            builder.addJerseyFilter(GZIPContentEncodingFilter.class.getName());
+        }
         builder.addJerseyFilter(ProfilingContainerResponseFilter.class.getName());
+        builder.addJerseyFilter(RequestDataFilter.class.getName());
 
         // Broader, to support the "Try it out!" feature
         //builder.addFilter("/" + SWAGGER_PATH + "*", ResponseCorsFilter.class);

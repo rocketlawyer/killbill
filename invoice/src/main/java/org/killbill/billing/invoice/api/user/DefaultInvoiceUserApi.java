@@ -35,6 +35,7 @@ import org.killbill.billing.ObjectType;
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.account.api.AccountInternalApi;
+import org.killbill.billing.account.api.ImmutableAccountData;
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.Currency;
@@ -205,9 +206,9 @@ public class DefaultInvoiceUserApi implements InvoiceUserApi {
                                             final CallContext context) throws InvoiceApiException {
         final InternalCallContext internalContext = internalCallContextFactory.createInternalCallContext(accountId, context);
 
-        final Account account;
+        final ImmutableAccountData account;
         try {
-            account = accountUserApi.getAccountById(accountId, internalContext);
+            account = accountUserApi.getImmutableAccountDataById(accountId, internalContext);
         } catch (final AccountApiException e) {
             throw new InvoiceApiException(e, ErrorCode.ACCOUNT_DOES_NOT_EXIST_FOR_ID, e.toString());
         }
@@ -308,7 +309,7 @@ public class DefaultInvoiceUserApi implements InvoiceUserApi {
             }
         };
 
-        return invoiceApiHelper.dispatchToInvoicePluginsAndInsertItems(accountId, withAccountLock, context);
+        return invoiceApiHelper.dispatchToInvoicePluginsAndInsertItems(accountId, false, withAccountLock, context);
     }
 
     @Override
@@ -364,7 +365,7 @@ public class DefaultInvoiceUserApi implements InvoiceUserApi {
             }
         };
 
-        final List<InvoiceItem> creditInvoiceItems = invoiceApiHelper.dispatchToInvoicePluginsAndInsertItems(accountId, withAccountLock, context);
+        final List<InvoiceItem> creditInvoiceItems = invoiceApiHelper.dispatchToInvoicePluginsAndInsertItems(accountId, false, withAccountLock, context);
         Preconditions.checkState(creditInvoiceItems.size() == 1, "Should have created a single credit invoice item: " + creditInvoiceItems);
 
         return creditInvoiceItems.get(0);
@@ -400,7 +401,7 @@ public class DefaultInvoiceUserApi implements InvoiceUserApi {
             }
         };
 
-        final List<InvoiceItem> adjustmentInvoiceItems = invoiceApiHelper.dispatchToInvoicePluginsAndInsertItems(accountId, withAccountLock, context);
+        final List<InvoiceItem> adjustmentInvoiceItems = invoiceApiHelper.dispatchToInvoicePluginsAndInsertItems(accountId, false, withAccountLock, context);
         Preconditions.checkState(adjustmentInvoiceItems.size() == 1, "Should have created a single adjustment item: " + adjustmentInvoiceItems);
 
         return adjustmentInvoiceItems.get(0);

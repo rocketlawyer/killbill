@@ -26,6 +26,7 @@ import org.killbill.billing.security.api.SecurityApi;
 import org.killbill.billing.util.audit.dao.AuditDao;
 import org.killbill.billing.util.cache.CacheControllerDispatcher;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.billing.util.config.SecurityConfig;
 import org.killbill.billing.util.customfield.api.DefaultCustomFieldUserApi;
 import org.killbill.billing.util.customfield.dao.CustomFieldDao;
 import org.killbill.billing.util.dao.NonEntityDao;
@@ -59,8 +60,6 @@ public abstract class UtilTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuite
     @Inject
     protected PersistentBus eventBus;
     @Inject
-    protected CacheControllerDispatcher controlCacheDispatcher;
-    @Inject
     protected NonEntityDao nonEntityDao;
     @Inject
     protected InternalCallContextFactory internalCallContextFactory;
@@ -86,6 +85,8 @@ public abstract class UtilTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuite
     protected TestApiListener eventsListener;
     @Inject
     protected SecurityApi securityApi;
+    @Inject
+    protected SecurityConfig securityConfig;
 
     @BeforeClass(groups = "slow")
     public void beforeClass() throws Exception {
@@ -111,8 +112,6 @@ public abstract class UtilTestSuiteWithEmbeddedDB extends GuicyKillbillTestSuite
 
         eventBus.start();
         eventBus.register(eventsListener);
-
-        controlCacheDispatcher.clearAll();
 
         // Make sure we start with a clean state
         assertListenerStatus();

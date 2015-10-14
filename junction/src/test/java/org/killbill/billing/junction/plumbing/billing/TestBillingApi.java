@@ -255,7 +255,6 @@ public class TestBillingApi extends JunctionTestSuiteNoDB {
         if (!SubscriptionBaseTransitionType.START_BILLING_DISABLED.equals(event.getTransitionType())) {
             Assert.assertEquals(nextPhase.getRecurring().getBillingPeriod(), event.getBillingPeriod());
         }
-        Assert.assertEquals(BillingMode.IN_ADVANCE, event.getBillingMode());
         Assert.assertEquals(desc, event.getTransitionType().toString());
     }
 
@@ -266,6 +265,8 @@ public class TestBillingApi extends JunctionTestSuiteNoDB {
         Mockito.when(account.getId()).thenReturn(UUID.randomUUID());
         Mockito.when(account.getTimeZone()).thenReturn(DateTimeZone.UTC);
         Mockito.when(accountInternalApi.getAccountById(Mockito.<UUID>any(), Mockito.<InternalTenantContext>any())).thenReturn(account);
+        Mockito.when(accountInternalApi.getImmutableAccountDataById(Mockito.<UUID>any(), Mockito.<InternalTenantContext>any())).thenReturn(account);
+        Mockito.when(accountInternalApi.getBCD(Mockito.<UUID>any(), Mockito.<InternalTenantContext>any())).thenReturn(billCycleDay);
         return account;
     }
 

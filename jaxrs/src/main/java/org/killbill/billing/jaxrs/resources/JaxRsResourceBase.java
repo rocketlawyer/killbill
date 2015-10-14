@@ -54,6 +54,7 @@ import org.killbill.billing.invoice.api.InvoicePayment;
 import org.killbill.billing.invoice.api.InvoicePaymentType;
 import org.killbill.billing.jaxrs.json.CustomFieldJson;
 import org.killbill.billing.jaxrs.json.JsonBase;
+import org.killbill.billing.jaxrs.json.PluginPropertyJson;
 import org.killbill.billing.jaxrs.json.TagJson;
 import org.killbill.billing.jaxrs.util.Context;
 import org.killbill.billing.jaxrs.util.JaxrsUriBuilder;
@@ -139,6 +140,10 @@ public abstract class JaxRsResourceBase implements JaxrsResource {
 
     protected Response getTags(final UUID accountId, final UUID taggedObjectId, final AuditMode auditMode, final boolean includeDeleted, final TenantContext context) throws TagDefinitionApiException {
         final List<Tag> tags = tagUserApi.getTagsForObject(taggedObjectId, getObjectType(), includeDeleted, context);
+        return createTagResponse(accountId, tags, auditMode, context);
+    }
+
+    protected Response createTagResponse(final UUID accountId, final List<Tag> tags, final AuditMode auditMode, final TenantContext context) throws TagDefinitionApiException {
         final AccountAuditLogsForObjectType tagsAuditLogs = auditUserApi.getAccountAuditLogs(accountId, ObjectType.TAG, auditMode.getLevel(), context);
 
         final Map<UUID, TagDefinition> tagDefinitionsCache = new HashMap<UUID, TagDefinition>();
@@ -152,9 +157,9 @@ public abstract class JaxRsResourceBase implements JaxrsResource {
             final List<AuditLog> auditLogs = tagsAuditLogs.getAuditLogs(tag.getId());
             result.add(new TagJson(tag, tagDefinition, auditLogs));
         }
-
         return Response.status(Response.Status.OK).entity(result).build();
     }
+
 
     protected Response createTags(final UUID id,
                                   final String tagList,
@@ -340,6 +345,20 @@ public abstract class JaxRsResourceBase implements JaxrsResource {
         return null;
     }
 
+    protected Iterable<PluginProperty> extractPluginProperties(@Nullable final Iterable<PluginPropertyJson> pluginProperties) {
+        return pluginProperties != null ?
+               Iterables.<PluginPropertyJson, PluginProperty>transform(pluginProperties,
+                                                                       new Function<PluginPropertyJson, PluginProperty>() {
+                                                                           @Override
+                                                                           public PluginProperty apply(final PluginPropertyJson pluginPropertyJson) {
+                                                                               return pluginPropertyJson.toPluginProperty();
+                                                                           }
+                                                                       }
+                                                                      ) :
+               ImmutableList.<PluginProperty>of();
+
+    }
+
     protected Iterable<PluginProperty> extractPluginProperties(@Nullable final Iterable<String> pluginProperties, final PluginProperty... additionalProperties) {
         final Collection<PluginProperty> properties = new LinkedList<PluginProperty>();
         if (pluginProperties == null) {
@@ -348,9 +367,14 @@ public abstract class JaxRsResourceBase implements JaxrsResource {
 
         for (final String pluginProperty : pluginProperties) {
             final List<String> property = ImmutableList.<String>copyOf(pluginProperty.split("="));
+            // Skip entries for which there is no value
+            if (property.size() == 1) {
+                continue;
+            }
+
             final String key = property.get(0);
             // Should we URL decode the value?
-            String value = property.size() == 1 ? null : Joiner.on("=").join(property.subList(1, property.size()));
+            String value = Joiner.on("=").join(property.subList(1, property.size()));
             if (pluginProperty.endsWith("=")) {
                 value += "=";
             }
@@ -362,7 +386,7 @@ public abstract class JaxRsResourceBase implements JaxrsResource {
         return properties;
     }
 
-    protected Payment createPurchaseForInvoice(final Account account, final UUID invoiceId, final BigDecimal amountToPay, final Boolean externalPayment, final Iterable<PluginProperty> pluginProperties, final CallContext callContext) throws PaymentApiException {
+    protected Payment createPurchaseForInvoice(final Account account, final UUID invoiceId, final BigDecimal amountToPay, final UUID paymentMethodId, final Boolean externalPayment, final Iterable<PluginProperty> pluginProperties, final CallContext callContext) throws PaymentApiException {
 
         final List<PluginProperty> properties = new ArrayList<PluginProperty>();
         final Iterator<PluginProperty> pluginPropertyIterator = pluginProperties.iterator();
@@ -376,7 +400,6 @@ public abstract class JaxRsResourceBase implements JaxrsResource {
                                                                   invoiceId.toString(), false);
         properties.add(invoiceProperty);
 
-        final UUID paymentMethodId = externalPayment ? null : account.getPaymentMethodId();
         return paymentApi.createPurchaseWithPaymentControl(account, paymentMethodId, null, amountToPay, account.getCurrency(), paymentExternalKey, transactionExternalKey,
                                                            properties, createInvoicePaymentControlPluginApiPaymentOptions(externalPayment), callContext);
     }

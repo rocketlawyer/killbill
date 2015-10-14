@@ -20,10 +20,9 @@ package org.killbill.billing.jaxrs;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-
-import javax.annotation.Nullable;
 
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
@@ -39,9 +38,9 @@ import org.killbill.billing.client.model.InvoiceItem;
 import org.killbill.billing.client.model.InvoicePayment;
 import org.killbill.billing.client.model.InvoicePayments;
 import org.killbill.billing.client.model.Invoices;
-import org.killbill.billing.client.model.Payment;
 import org.killbill.billing.client.model.PaymentMethod;
 import org.killbill.billing.entitlement.api.SubscriptionEventType;
+import org.killbill.billing.invoice.api.DryRunType;
 import org.killbill.billing.payment.provider.ExternalPaymentProviderPlugin;
 import org.killbill.billing.util.api.AuditLevel;
 import org.testng.Assert;
@@ -51,7 +50,6 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Iterables;
 
 import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 import static org.testng.Assert.assertTrue;
 
@@ -94,7 +92,10 @@ public class TestInvoice extends TestJaxrsBase {
         assertEquals(firstInvoiceByNumberJson, invoiceJson);
 
         // Then create a dryRun for next upcoming invoice
-        final Invoice dryRunInvoice = killBillClient.createDryRunInvoice(accountJson.getAccountId(), null, true, null, createdBy, reason, comment);
+        final InvoiceDryRun dryRunArg = new InvoiceDryRun(DryRunType.UPCOMING_INVOICE, null,
+                                                          null, null, null, null, null, null, null, null, null, null);
+
+        final Invoice dryRunInvoice = killBillClient.createDryRunInvoice(accountJson.getAccountId(), null, dryRunArg, createdBy, reason, comment);
         assertEquals(dryRunInvoice.getBalance(), new BigDecimal("249.95"));
         assertEquals(dryRunInvoice.getTargetDate(), new LocalDate(2012, 6, 25));
         assertEquals(dryRunInvoice.getItems().size(), 1);
@@ -111,7 +112,6 @@ public class TestInvoice extends TestJaxrsBase {
         assertEquals(newInvoiceList.size(), 3);
     }
 
-
     @Test(groups = "slow", description = "Can create a subscription in dryRun mode and get an invoice back")
     public void testDryRunSubscriptionCreate() throws Exception {
         final DateTime initialDate = new DateTime(2012, 4, 25, 0, 3, 42, 0);
@@ -119,9 +119,9 @@ public class TestInvoice extends TestJaxrsBase {
 
         // "Assault-Rifle", BillingPeriod.ANNUAL, "rescue", BillingActionPolicy.IMMEDIATE,
         final Account accountJson = createAccountWithDefaultPaymentMethod();
-        final InvoiceDryRun dryRunArg = new InvoiceDryRun(SubscriptionEventType.START_BILLING,
+        final InvoiceDryRun dryRunArg = new InvoiceDryRun(DryRunType.TARGET_DATE, SubscriptionEventType.START_BILLING,
                                                           null, "Assault-Rifle", ProductCategory.BASE, BillingPeriod.ANNUAL, null, null, null, null, null, null);
-        final Invoice dryRunInvoice = killBillClient.createDryRunInvoice(accountJson.getAccountId(), new LocalDate(initialDate, DateTimeZone.forID(accountJson.getTimeZone())), false, dryRunArg, createdBy, reason, comment);
+        final Invoice dryRunInvoice = killBillClient.createDryRunInvoice(accountJson.getAccountId(), new LocalDate(initialDate, DateTimeZone.forID(accountJson.getTimeZone())), dryRunArg, createdBy, reason, comment);
         assertEquals(dryRunInvoice.getItems().size(), 1);
 
     }
@@ -346,6 +346,41 @@ public class TestInvoice extends TestJaxrsBase {
         assertEquals(invoiceWithItems.getItems().size(), 1);
         assertEquals(invoiceWithItems.getItems().get(0).getDescription(), externalCharge.getDescription());
         assertNull(invoiceWithItems.getItems().get(0).getBundleId());
+
+        // Verify the total number of invoices
+        assertEquals(killBillClient.getInvoicesForAccount(accountJson.getAccountId()).size(), 3);
+    }
+
+    @Test(groups = "slow", description = "Can create multiple external charges")
+    public void testExternalCharges() throws Exception {
+        final Account accountJson = createAccountNoPMBundleAndSubscriptionAndWaitForFirstInvoice();
+
+        // Get the invoices
+        assertEquals(killBillClient.getInvoicesForAccount(accountJson.getAccountId()).size(), 2);
+
+        // Post an external charge
+        final BigDecimal chargeAmount = BigDecimal.TEN;
+
+        final List<InvoiceItem> externalCharges = new ArrayList<InvoiceItem>();
+
+        // Does not pass currency to test on purpose that we will default to account currency
+        final InvoiceItem externalCharge1 = new InvoiceItem();
+        externalCharge1.setAccountId(accountJson.getAccountId());
+        externalCharge1.setAmount(chargeAmount);
+        externalCharge1.setDescription(UUID.randomUUID().toString());
+        externalCharges.add(externalCharge1);
+
+        final InvoiceItem externalCharge2 = new InvoiceItem();
+        externalCharge2.setAccountId(accountJson.getAccountId());
+        externalCharge2.setAmount(chargeAmount);
+        externalCharge2.setCurrency(Currency.valueOf(accountJson.getCurrency()));
+        externalCharge2.setDescription(UUID.randomUUID().toString());
+        externalCharges.add(externalCharge2);
+
+        final List<InvoiceItem> createdExternalCharges = killBillClient.createExternalCharges(externalCharges, clock.getUTCNow(), false, createdBy, reason, comment);
+        assertEquals(createdExternalCharges.size(), 2);
+        assertEquals(createdExternalCharges.get(0).getCurrency().toString(), accountJson.getCurrency());
+        assertEquals(createdExternalCharges.get(1).getCurrency().toString(), accountJson.getCurrency());
 
         // Verify the total number of invoices
         assertEquals(killBillClient.getInvoicesForAccount(accountJson.getAccountId()).size(), 3);

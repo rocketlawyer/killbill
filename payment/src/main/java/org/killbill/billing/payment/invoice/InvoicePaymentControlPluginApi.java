@@ -33,6 +33,7 @@ import org.killbill.billing.ObjectType;
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.control.plugin.api.PaymentApiType;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
 import org.killbill.billing.invoice.api.InvoiceInternalApi;
@@ -114,7 +115,9 @@ public final class InvoicePaymentControlPluginApi implements PaymentControlPlugi
 
     @Override
     public PriorPaymentControlResult priorCall(final PaymentControlContext paymentControlContext, final Iterable<PluginProperty> pluginProperties) throws PaymentControlApiException {
+
         final TransactionType transactionType = paymentControlContext.getTransactionType();
+        Preconditions.checkArgument(paymentControlContext.getPaymentApiType() == PaymentApiType.PAYMENT_TRANSACTION);
         Preconditions.checkArgument(transactionType == TransactionType.PURCHASE ||
                                     transactionType == TransactionType.REFUND ||
                                     transactionType == TransactionType.CHARGEBACK);
@@ -146,7 +149,7 @@ public final class InvoicePaymentControlPluginApi implements PaymentControlPlugi
                 case PURCHASE:
                     final UUID invoiceId = getInvoiceId(pluginProperties);
                     existingInvoicePayment = invoiceApi.getInvoicePaymentForAttempt(paymentControlContext.getPaymentId(), internalContext);
-                    if (existingInvoicePayment != null) {
+                    if (existingInvoicePayment != null && existingInvoicePayment.isSuccess()) {
                         log.info("onSuccessCall was already completed for payment purchase :" + paymentControlContext.getPaymentId());
                     } else {
                         invoiceApi.notifyOfPayment(invoiceId,
@@ -155,6 +158,7 @@ public final class InvoicePaymentControlPluginApi implements PaymentControlPlugi
                                                    paymentControlContext.getProcessedCurrency(),
                                                    paymentControlContext.getPaymentId(),
                                                    paymentControlContext.getCreatedDate(),
+                                                   true,
                                                    internalContext);
                     }
                     break;
@@ -190,11 +194,28 @@ public final class InvoicePaymentControlPluginApi implements PaymentControlPlugi
     }
 
     @Override
-    public OnFailurePaymentControlResult onFailureCall(final PaymentControlContext paymentControlContext, final Iterable<PluginProperty> properties) throws PaymentControlApiException {
+    public OnFailurePaymentControlResult onFailureCall(final PaymentControlContext paymentControlContext, final Iterable<PluginProperty> pluginProperties) throws PaymentControlApiException {
         final InternalCallContext internalContext = internalCallContextFactory.createInternalCallContext(paymentControlContext.getAccountId(), paymentControlContext);
         final TransactionType transactionType = paymentControlContext.getTransactionType();
         switch (transactionType) {
             case PURCHASE:
+                final UUID invoiceId = getInvoiceId(pluginProperties);
+                if (paymentControlContext.getPaymentId() != null) {
+                    try {
+                        invoiceApi.notifyOfPayment(invoiceId,
+                                                   paymentControlContext.getAmount(),
+                                                   paymentControlContext.getCurrency(),
+                                                   // processed currency may be null so we use currency; processed currency will be updated if/when payment succeeds
+                                                   paymentControlContext.getCurrency(),
+                                                   paymentControlContext.getPaymentId(),
+                                                   paymentControlContext.getCreatedDate(),
+                                                   false,
+                                                   internalContext);
+                    } catch (InvoiceApiException e) {
+                        log.error("InvoicePaymentControlPluginApi onFailureCall failed ton update invoice for attemptId = " + paymentControlContext.getAttemptPaymentId() + ", transactionType  = " + transactionType, e);
+                    }
+                }
+
                 final DateTime nextRetryDate = computeNextRetryDate(paymentControlContext.getPaymentExternalKey(), paymentControlContext.isApiPayment(), internalContext);
                 return new DefaultFailureCallResult(nextRetryDate);
             case REFUND:
@@ -206,13 +227,13 @@ public final class InvoicePaymentControlPluginApi implements PaymentControlPlugi
         }
     }
 
-    public void process_AUTO_PAY_OFF_removal(final Account account, final InternalCallContext internalCallContext) {
-        final List<PluginAutoPayOffModelDao> entries = controlDao.getAutoPayOffEntry(account.getId());
+    public void process_AUTO_PAY_OFF_removal(final UUID accountId, final InternalCallContext internalCallContext) {
+        final List<PluginAutoPayOffModelDao> entries = controlDao.getAutoPayOffEntry(accountId);
         for (final PluginAutoPayOffModelDao cur : entries) {
             // TODO In theory we should pass not only PLUGIN_NAME, but also all the plugin list associated which the original call
-            retryServiceScheduler.scheduleRetry(ObjectType.ACCOUNT, account.getId(), cur.getAttemptId(), internalCallContext.getTenantRecordId(), ImmutableList.<String>of(PLUGIN_NAME), clock.getUTCNow());
+            retryServiceScheduler.scheduleRetry(ObjectType.ACCOUNT, accountId, cur.getAttemptId(), internalCallContext.getTenantRecordId(), ImmutableList.<String>of(PLUGIN_NAME), clock.getUTCNow());
         }
-        controlDao.removeAutoPayOffEntry(account.getId());
+        controlDao.removeAutoPayOffEntry(accountId);
     }
 
     private UUID getInvoiceId(final Iterable<PluginProperty> pluginProperties) throws PaymentControlApiException {
