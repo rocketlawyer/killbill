@@ -23,6 +23,8 @@ import org.killbill.billing.account.api.AccountInternalApi;
 import org.killbill.billing.invoice.api.InvoiceInternalApi;
 import org.killbill.billing.osgi.api.OSGIServiceRegistration;
 import org.killbill.billing.payment.api.PaymentApi;
+import org.killbill.billing.payment.api.PaymentGatewayApi;
+import org.killbill.billing.payment.core.PaymentExecutors;
 import org.killbill.billing.payment.core.PaymentProcessor;
 import org.killbill.billing.payment.core.PaymentMethodProcessor;
 import org.killbill.billing.payment.core.sm.PaymentStateMachineHelper;
@@ -60,6 +62,8 @@ public abstract class PaymentTestSuiteWithEmbeddedDB extends GuicyKillbillTestSu
     @Inject
     protected PaymentApi paymentApi;
     @Inject
+    protected PaymentGatewayApi paymentGatewayApi;
+    @Inject
     protected AccountInternalApi accountApi;
     @Inject
     protected PaymentStateMachineHelper paymentSMHelper;
@@ -67,6 +71,8 @@ public abstract class PaymentTestSuiteWithEmbeddedDB extends GuicyKillbillTestSu
     protected PaymentDao paymentDao;
     @Inject
     protected TestPaymentHelper testHelper;
+    @Inject
+    protected PaymentExecutors paymentExecutors;
 
     @Override
     protected KillbillConfigSource getConfigSource() {
@@ -84,6 +90,7 @@ public abstract class PaymentTestSuiteWithEmbeddedDB extends GuicyKillbillTestSu
     @BeforeMethod(groups = "slow")
     public void beforeMethod() throws Exception {
         super.beforeMethod();
+        paymentExecutors.initialize();
         eventBus.start();
         Profiling.resetPerThreadProfilingData();
         clock.resetDeltaFromReality();
@@ -93,5 +100,6 @@ public abstract class PaymentTestSuiteWithEmbeddedDB extends GuicyKillbillTestSu
     @AfterMethod(groups = "slow")
     public void afterMethod() throws Exception {
         eventBus.stop();
+        paymentExecutors.stop();
     }
 }

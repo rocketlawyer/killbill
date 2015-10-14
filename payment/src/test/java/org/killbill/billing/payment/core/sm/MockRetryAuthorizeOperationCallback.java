@@ -28,12 +28,14 @@ import org.killbill.billing.payment.api.PaymentApiException;
 import org.killbill.billing.payment.api.TransactionStatus;
 import org.killbill.billing.payment.core.PaymentProcessor;
 import org.killbill.billing.payment.core.sm.control.AuthorizeControlOperation;
+import org.killbill.billing.payment.core.sm.control.ControlPluginRunner;
 import org.killbill.billing.payment.core.sm.control.PaymentStateControlContext;
 import org.killbill.billing.payment.dao.PaymentDao;
 import org.killbill.billing.payment.dao.PaymentModelDao;
 import org.killbill.billing.payment.dao.PaymentTransactionModelDao;
 import org.killbill.billing.payment.dispatcher.PluginDispatcher;
 import org.killbill.billing.control.plugin.api.PaymentControlPluginApi;
+import org.killbill.billing.util.config.PaymentConfig;
 import org.killbill.clock.Clock;
 import org.killbill.commons.locker.GlobalLocker;
 
@@ -45,8 +47,15 @@ public class MockRetryAuthorizeOperationCallback extends AuthorizeControlOperati
     private Exception exception;
     private OperationResult result;
 
-    public MockRetryAuthorizeOperationCallback(final GlobalLocker locker, final PluginDispatcher<OperationResult> paymentPluginDispatcher, final PaymentStateControlContext paymentStateContext, final PaymentProcessor paymentProcessor, final OSGIServiceRegistration<PaymentControlPluginApi> retryPluginRegistry, final PaymentDao paymentDao, final Clock clock) {
-        super(locker, paymentPluginDispatcher, paymentStateContext, paymentProcessor, retryPluginRegistry);
+    public MockRetryAuthorizeOperationCallback(final GlobalLocker locker,
+                                               final PluginDispatcher<OperationResult> paymentPluginDispatcher,
+                                               final PaymentConfig paymentConfig,
+                                               final PaymentStateControlContext paymentStateContext,
+                                               final PaymentProcessor paymentProcessor,
+                                               final ControlPluginRunner controlPluginRunner,
+                                               final PaymentDao paymentDao,
+                                               final Clock clock) {
+        super(locker, paymentPluginDispatcher, paymentConfig, paymentStateContext, paymentProcessor, controlPluginRunner);
         this.paymentDao = paymentDao;
         this.clock = clock;
     }
@@ -62,23 +71,23 @@ public class MockRetryAuthorizeOperationCallback extends AuthorizeControlOperati
         }
         final PaymentModelDao payment = new PaymentModelDao(clock.getUTCNow(),
                                                             clock.getUTCNow(),
-                                                            paymentStateContext.account.getId(),
-                                                            paymentStateContext.paymentMethodId,
-                                                            paymentStateContext.paymentExternalKey);
+                                                            paymentStateContext.getAccount().getId(),
+                                                            paymentStateContext.getPaymentMethodId(),
+                                                            paymentStateContext.getPaymentExternalKey());
 
         final PaymentTransactionModelDao transaction = new PaymentTransactionModelDao(clock.getUTCNow(),
                                                                                       clock.getUTCNow(),
                                                                                       paymentStateContext.getAttemptId(),
-                                                                                      paymentStateContext.paymentTransactionExternalKey,
-                                                                                      paymentStateContext.paymentId,
-                                                                                      paymentStateContext.transactionType,
+                                                                                      paymentStateContext.getPaymentTransactionExternalKey(),
+                                                                                      paymentStateContext.getPaymentId(),
+                                                                                      paymentStateContext.getTransactionType(),
                                                                                       clock.getUTCNow(),
                                                                                       TransactionStatus.SUCCESS,
-                                                                                      paymentStateContext.amount,
-                                                                                      paymentStateContext.currency,
+                                                                                      paymentStateContext.getAmount(),
+                                                                                      paymentStateContext.getCurrency(),
                                                                                       "",
                                                                                       "");
-        final PaymentModelDao paymentModelDao = paymentDao.insertPaymentWithFirstTransaction(payment, transaction, paymentStateContext.internalCallContext);
+        final PaymentModelDao paymentModelDao = paymentDao.insertPaymentWithFirstTransaction(payment, transaction, paymentStateContext.getInternalCallContext());
         final PaymentTransaction convertedTransaction = new DefaultPaymentTransaction(transaction.getId(),
                                                                                                   paymentStateContext.getAttemptId(),
                                                                                                   transaction.getTransactionExternalKey(),

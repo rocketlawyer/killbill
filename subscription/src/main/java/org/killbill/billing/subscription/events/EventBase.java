@@ -30,11 +30,10 @@ public abstract class EventBase implements SubscriptionBaseEvent {
     private final DateTime updatedDate;
     private final DateTime requestedDate;
     private final DateTime effectiveDate;
-    private final DateTime processedDate;
 
-    private long totalOrdering;
-    private long activeVersion;
-    private boolean isActive;
+    private final long totalOrdering;
+    private final long activeVersion;
+    private final boolean isActive;
 
     public EventBase(final EventBaseBuilder<?> builder) {
         this.totalOrdering = builder.getTotalOrdering();
@@ -44,7 +43,6 @@ public abstract class EventBase implements SubscriptionBaseEvent {
         this.updatedDate = builder.getUpdatedDate();
         this.requestedDate = builder.getRequestedDate();
         this.effectiveDate = builder.getEffectiveDate();
-        this.processedDate = builder.getProcessedDate();
         this.activeVersion = builder.getActiveVersion();
         this.isActive = builder.isActive();
     }
@@ -57,11 +55,6 @@ public abstract class EventBase implements SubscriptionBaseEvent {
     @Override
     public DateTime getEffectiveDate() {
         return effectiveDate;
-    }
-
-    @Override
-    public DateTime getProcessedDate() {
-        return processedDate;
     }
 
     @Override
@@ -95,28 +88,8 @@ public abstract class EventBase implements SubscriptionBaseEvent {
     }
 
     @Override
-    public void setActiveVersion(final long activeVersion) {
-        this.activeVersion = activeVersion;
-    }
-
-    @Override
     public boolean isActive() {
         return isActive;
-    }
-
-    @Override
-    public void deactivate() {
-        this.isActive = false;
-    }
-
-    @Override
-    public void reactivate() {
-        this.isActive = true;
-    }
-
-    @Override
-    public void setTotalOrdering(final long totalOrdering) {
-        this.totalOrdering = totalOrdering;
     }
 
     //
@@ -138,10 +111,6 @@ public abstract class EventBase implements SubscriptionBaseEvent {
             return -1;
         } else if (effectiveDate.isAfter(other.getEffectiveDate())) {
             return 1;
-        } else if (processedDate.isBefore(other.getProcessedDate())) {
-            return -1;
-        } else if (processedDate.isAfter(other.getProcessedDate())) {
-            return 1;
         } else if (requestedDate.isBefore(other.getRequestedDate())) {
             return -1;
         } else if (requestedDate.isAfter(other.getRequestedDate())) {
@@ -149,7 +118,7 @@ public abstract class EventBase implements SubscriptionBaseEvent {
         } else if (getType() != other.getType()) {
             return (getType() == EventType.PHASE) ? -1 : 1;
         } else if (getType() == EventType.API_USER) {
-            return ((ApiEvent) this).getEventType().compareTo(((ApiEvent) other).getEventType());
+            return ((ApiEvent) this).getApiEventType().compareTo(((ApiEvent) other).getApiEventType());
         } else {
             return uuid.compareTo(other.getId());
         }

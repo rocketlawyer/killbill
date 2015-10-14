@@ -28,7 +28,6 @@ import java.util.UUID;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-import org.killbill.billing.catalog.api.BillingMode;
 import org.mockito.Mockito;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
@@ -322,7 +321,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         disabledDuration.add(new DisabledDuration(now, null));
         billingEvents.add(createRealEvent(now.minusDays(1), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 1);
         assertEquals(results.first().getEffectiveDate(), now);
@@ -344,7 +343,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         billingEvents.add(createRealEvent(now.minusDays(1), subscription1));
         billingEvents.add(createRealEvent(now.plusDays(1), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 1);
         assertEquals(results.first().getEffectiveDate(), now);
@@ -365,7 +364,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         disabledDuration.add(new DisabledDuration(now, null));
         billingEvents.add(createRealEvent(now.plusDays(1), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 0);
     }
@@ -381,7 +380,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         disabledDuration.add(new DisabledDuration(now, now.plusDays(2)));
         billingEvents.add(createRealEvent(now.minusDays(1), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 2);
         assertEquals(results.first().getEffectiveDate(), now);
@@ -406,7 +405,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         billingEvents.add(createRealEvent(now.minusDays(1), subscription1));
         billingEvents.add(createRealEvent(now.plusDays(1), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 2);
         assertEquals(results.first().getEffectiveDate(), now);
@@ -432,7 +431,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         billingEvents.add(createRealEvent(now.plusDays(1), subscription1));
         billingEvents.add(createRealEvent(now.plusDays(3), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 2);
         assertEquals(results.first().getEffectiveDate(), now);
@@ -456,7 +455,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         disabledDuration.add(new DisabledDuration(now, now.plusDays(2)));
         billingEvents.add(createRealEvent(now.plusDays(1), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 1);
         assertEquals(results.last().getEffectiveDate(), now.plusDays(2));
@@ -475,7 +474,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         disabledDuration.add(new DisabledDuration(now, now.plusDays(2)));
         billingEvents.add(createRealEvent(now.plusDays(1), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 1);
         assertEquals(results.last().getEffectiveDate(), now.plusDays(2));
@@ -494,7 +493,7 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         disabledDuration.add(new DisabledDuration(now, now.plusDays(2)));
         billingEvents.add(createRealEvent(now.plusDays(3), subscription1));
 
-        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, account, subscription1);
+        final SortedSet<BillingEvent> results = blockingCalculator.createNewEvents(disabledDuration, billingEvents, subscription1);
 
         assertEquals(results.size(), 0);
     }
@@ -532,14 +531,13 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         final BigDecimal recurringPrice = BigDecimal.TEN;
         final Currency currency = Currency.USD;
         final String description = "";
-        final BillingMode billingModeType = BillingMode.IN_ADVANCE;
         final BillingPeriod billingPeriod = BillingPeriod.MONTHLY;
         final Long totalOrdering = 0L;
         final DateTimeZone tz = DateTimeZone.UTC;
 
-        return new DefaultBillingEvent(account, subscription, effectiveDate, plan, planPhase,
+        return new DefaultBillingEvent(subscription, effectiveDate, true, plan, planPhase,
                                        fixedPrice, recurringPrice, currency,
-                                       billingPeriod, billCycleDay, billingModeType,
+                                       billingPeriod, billCycleDay,
                                        description, totalOrdering, type, tz);
     }
 
@@ -578,7 +576,6 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         assertNull(result.getRecurringPrice());
         assertEquals(result.getCurrency(), event.getCurrency());
         assertEquals(result.getDescription(), "");
-        assertEquals(result.getBillingMode(), event.getBillingMode());
         assertEquals(result.getBillingPeriod(), BillingPeriod.NO_BILLING_PERIOD);
         assertEquals(result.getTransitionType(), SubscriptionBaseTransitionType.START_BILLING_DISABLED);
         // TODO - ugly, fragile
@@ -599,7 +596,6 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
         assertEquals(result.getRecurringPrice(), event.getRecurringPrice());
         assertEquals(result.getCurrency(), event.getCurrency());
         assertEquals(result.getDescription(), "");
-        assertEquals(result.getBillingMode(), event.getBillingMode());
         assertEquals(result.getBillingPeriod(), event.getBillingPeriod());
         assertEquals(result.getTransitionType(), SubscriptionBaseTransitionType.END_BILLING_DISABLED);
         // TODO - ugly, fragile
@@ -609,8 +605,8 @@ public class TestBlockingCalculator extends JunctionTestSuiteNoDB {
     private class MockBillingEvent extends DefaultBillingEvent {
 
         public MockBillingEvent() {
-            super(account, subscription1, clock.getUTCNow(), null, null, BigDecimal.ZERO, BigDecimal.TEN, Currency.USD, BillingPeriod.ANNUAL,
-                  4, BillingMode.IN_ADVANCE, "", 3L, SubscriptionBaseTransitionType.CREATE, DateTimeZone.UTC);
+            super(subscription1, clock.getUTCNow(), true, null, null, BigDecimal.ZERO, BigDecimal.TEN, Currency.USD, BillingPeriod.ANNUAL,
+                  4, "", 3L, SubscriptionBaseTransitionType.CREATE, DateTimeZone.UTC);
         }
     }
 

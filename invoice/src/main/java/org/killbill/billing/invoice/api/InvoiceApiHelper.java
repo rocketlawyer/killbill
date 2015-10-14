@@ -39,6 +39,7 @@ import org.killbill.billing.invoice.model.ItemAdjInvoiceItem;
 import org.killbill.billing.util.UUIDs;
 import org.killbill.billing.util.callcontext.CallContext;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
+import org.killbill.billing.util.config.InvoiceConfig;
 import org.killbill.billing.util.globallocker.LockerType;
 import org.killbill.commons.locker.GlobalLock;
 import org.killbill.commons.locker.GlobalLocker;
@@ -57,32 +58,32 @@ public class InvoiceApiHelper {
 
     private static final Logger log = LoggerFactory.getLogger(InvoiceApiHelper.class);
 
-    private static final int NB_LOCK_TRY = 5;
-
     private final InvoicePluginDispatcher invoicePluginDispatcher;
     private final InvoiceDao dao;
     private final GlobalLocker locker;
     private final InternalCallContextFactory internalCallContextFactory;
+    private final InvoiceConfig invoiceConfig;
 
     @Inject
-    public InvoiceApiHelper(final InvoicePluginDispatcher invoicePluginDispatcher, final InvoiceDao dao, final GlobalLocker locker, final InternalCallContextFactory internalCallContextFactory) {
+    public InvoiceApiHelper(final InvoicePluginDispatcher invoicePluginDispatcher, final InvoiceDao dao, final GlobalLocker locker, final InvoiceConfig invoiceConfig, final InternalCallContextFactory internalCallContextFactory) {
         this.invoicePluginDispatcher = invoicePluginDispatcher;
         this.dao = dao;
         this.locker = locker;
+        this.invoiceConfig = invoiceConfig;
         this.internalCallContextFactory = internalCallContextFactory;
     }
 
-    public List<InvoiceItem> dispatchToInvoicePluginsAndInsertItems(final UUID accountId, final WithAccountLock withAccountLock, final CallContext context) throws InvoiceApiException {
+    public List<InvoiceItem> dispatchToInvoicePluginsAndInsertItems(final UUID accountId, final boolean isDryRun, final WithAccountLock withAccountLock, final CallContext context) throws InvoiceApiException {
         GlobalLock lock = null;
         try {
-            lock = locker.lockWithNumberOfTries(LockerType.ACCNT_INV_PAY.toString(), accountId.toString(), NB_LOCK_TRY);
+            lock = locker.lockWithNumberOfTries(LockerType.ACCNT_INV_PAY.toString(), accountId.toString(), invoiceConfig.getMaxGlobalLockRetries());
 
             final Iterable<Invoice> invoicesForPlugins = withAccountLock.prepareInvoices();
 
             final List<InvoiceModelDao> invoiceModelDaos = new LinkedList<InvoiceModelDao>();
             for (final Invoice invoiceForPlugin : invoicesForPlugins) {
                 // Call plugin
-                final List<InvoiceItem> additionalInvoiceItems = invoicePluginDispatcher.getAdditionalInvoiceItems(invoiceForPlugin, context);
+                final List<InvoiceItem> additionalInvoiceItems = invoicePluginDispatcher.getAdditionalInvoiceItems(invoiceForPlugin, isDryRun, context);
                 invoiceForPlugin.addInvoiceItems(additionalInvoiceItems);
 
                 // Transformation to InvoiceModelDao

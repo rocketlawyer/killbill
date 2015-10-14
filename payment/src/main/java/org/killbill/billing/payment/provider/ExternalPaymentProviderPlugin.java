@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -29,11 +29,11 @@ import org.killbill.billing.payment.api.PluginProperty;
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.plugin.api.GatewayNotification;
 import org.killbill.billing.payment.plugin.api.HostedPaymentPageFormDescriptor;
-import org.killbill.billing.payment.plugin.api.PaymentTransactionInfoPlugin;
 import org.killbill.billing.payment.plugin.api.PaymentMethodInfoPlugin;
 import org.killbill.billing.payment.plugin.api.PaymentPluginApi;
 import org.killbill.billing.payment.plugin.api.PaymentPluginApiException;
 import org.killbill.billing.payment.plugin.api.PaymentPluginStatus;
+import org.killbill.billing.payment.plugin.api.PaymentTransactionInfoPlugin;
 import org.killbill.billing.util.callcontext.CallContext;
 import org.killbill.billing.util.callcontext.TenantContext;
 import org.killbill.billing.util.entity.DefaultPagination;
@@ -41,14 +41,11 @@ import org.killbill.billing.util.entity.Pagination;
 import org.killbill.clock.Clock;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterators;
+import com.google.common.collect.ImmutableSet;
 import com.google.inject.Inject;
 
 /**
  * Special plugin used to record external payments (i.e. payments not issued by Killbill), such as checks.
- * <p/>
- * The implementation is very similar to the no-op plugin, which it extends. This can potentially be an issue
- * if Killbill is processing a lot of external payments as they are all kept in memory.
  */
 public class ExternalPaymentProviderPlugin implements PaymentPluginApi {
 
@@ -63,43 +60,42 @@ public class ExternalPaymentProviderPlugin implements PaymentPluginApi {
 
     @Override
     public PaymentTransactionInfoPlugin authorizePayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext callContext) throws PaymentPluginApiException {
-        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.AUTHORIZE, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null);
+        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.AUTHORIZE, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null, null);
     }
 
     @Override
     public PaymentTransactionInfoPlugin capturePayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext callContext) throws PaymentPluginApiException {
-        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.CAPTURE, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null);
+        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.CAPTURE, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null, null);
     }
 
     @Override
     public PaymentTransactionInfoPlugin purchasePayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {
-        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.PURCHASE, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null);
+        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.PURCHASE, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null, null);
     }
 
     @Override
     public PaymentTransactionInfoPlugin voidPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final Iterable<PluginProperty> properties, final CallContext callContext) throws PaymentPluginApiException {
-        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.VOID, BigDecimal.ZERO, null, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null);
+        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.VOID, BigDecimal.ZERO, null, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null, null);
     }
 
     @Override
     public PaymentTransactionInfoPlugin creditPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext callContext) throws PaymentPluginApiException {
-        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.CREDIT, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null);
+        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.CREDIT, amount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null, null);
     }
 
     @Override
     public List<PaymentTransactionInfoPlugin> getPaymentInfo(final UUID kbAccountId, final UUID kbPaymentId, final Iterable<PluginProperty> properties, final TenantContext context) throws PaymentPluginApiException {
-        // TODO broken...
         return ImmutableList.of();
     }
 
     @Override
     public Pagination<PaymentTransactionInfoPlugin> searchPayments(final String searchKey, final Long offset, final Long limit, final Iterable<PluginProperty> properties, final TenantContext tenantContext) throws PaymentPluginApiException {
-        return new DefaultPagination<PaymentTransactionInfoPlugin>(offset, limit, 0L, 0L, Iterators.<PaymentTransactionInfoPlugin>emptyIterator());
+        return new DefaultPagination<PaymentTransactionInfoPlugin>(offset, limit, 0L, 0L, ImmutableSet.<PaymentTransactionInfoPlugin>of().iterator());
     }
 
     @Override
     public PaymentTransactionInfoPlugin refundPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal refundAmount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {
-        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.REFUND, BigDecimal.ZERO, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null);
+        return new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, TransactionType.REFUND, refundAmount, currency, clock.getUTCNow(), clock.getUTCNow(), PaymentPluginStatus.PROCESSED, null, null);
     }
 
     @Override
@@ -126,7 +122,7 @@ public class ExternalPaymentProviderPlugin implements PaymentPluginApi {
 
     @Override
     public Pagination<PaymentMethodPlugin> searchPaymentMethods(final String searchKey, final Long offset, final Long limit, final Iterable<PluginProperty> properties, final TenantContext tenantContext) throws PaymentPluginApiException {
-        return new DefaultPagination<PaymentMethodPlugin>(offset, limit, 0L, 0L, Iterators.<PaymentMethodPlugin>emptyIterator());
+        return new DefaultPagination<PaymentMethodPlugin>(offset, limit, 0L, 0L, ImmutableSet.<PaymentMethodPlugin>of().iterator());
     }
 
     @Override
@@ -135,11 +131,11 @@ public class ExternalPaymentProviderPlugin implements PaymentPluginApi {
 
     @Override
     public HostedPaymentPageFormDescriptor buildFormDescriptor(final UUID kbAccountId, final Iterable<PluginProperty> customFields, final Iterable<PluginProperty> properties, final CallContext callContext) {
-        return null;
+        return new DefaultNoOpHostedPaymentPageFormDescriptor(kbAccountId);
     }
 
     @Override
     public GatewayNotification processNotification(final String notification, final Iterable<PluginProperty> properties, final CallContext callContext) throws PaymentPluginApiException {
-        return null;
+        return new DefaultNoOpGatewayNotification();
     }
 }

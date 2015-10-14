@@ -81,7 +81,6 @@ public class TenantCatalogCacheLoader extends BaseCacheLoader {
     }
 
     public interface LoaderCallback {
-
         public Object loadCatalog(final List<String> catalogXMLs, final Long tenantRecordId) throws CatalogApiException;
     }
 }

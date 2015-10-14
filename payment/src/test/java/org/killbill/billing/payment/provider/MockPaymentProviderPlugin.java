@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2015 Groupon, Inc
+ * Copyright 2014-2015 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -20,6 +20,7 @@ package org.killbill.billing.payment.provider;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -33,8 +34,8 @@ import org.killbill.billing.payment.api.TestPaymentMethodPlugin;
 import org.killbill.billing.payment.api.TransactionType;
 import org.killbill.billing.payment.plugin.api.GatewayNotification;
 import org.killbill.billing.payment.plugin.api.HostedPaymentPageFormDescriptor;
-import org.killbill.billing.payment.plugin.api.NoOpPaymentPluginApi;
 import org.killbill.billing.payment.plugin.api.PaymentMethodInfoPlugin;
+import org.killbill.billing.payment.plugin.api.PaymentPluginApi;
 import org.killbill.billing.payment.plugin.api.PaymentPluginApiException;
 import org.killbill.billing.payment.plugin.api.PaymentPluginStatus;
 import org.killbill.billing.payment.plugin.api.PaymentTransactionInfoPlugin;
@@ -53,7 +54,12 @@ import com.google.inject.Inject;
  * This MockPaymentProviderPlugin only works for a single accounts as we don't specify the accountId
  * for operations such as addPaymentMethod.
  */
-public class MockPaymentProviderPlugin implements NoOpPaymentPluginApi {
+public class MockPaymentProviderPlugin implements PaymentPluginApi {
+
+    public static final String GATEWAY_ERROR_CODE = "gatewayErrorCode";
+    public static final String GATEWAY_ERROR = "gatewayError";
+
+    public static final String PLUGIN_PROPERTY_PAYMENT_PLUGIN_STATUS_OVERRIDE = "paymentPluginStatusOverride";
 
     public static final String PLUGIN_NAME = "__NO_OP__";
 
@@ -179,7 +185,6 @@ public class MockPaymentProviderPlugin implements NoOpPaymentPluginApi {
         clear();
     }
 
-    @Override
     public void clear() {
         makeNextInvoiceFailWithException.set(false);
         makeAllInvoicesFailWithError.set(false);
@@ -190,48 +195,51 @@ public class MockPaymentProviderPlugin implements NoOpPaymentPluginApi {
         paymentMethodsInfo.clear();
     }
 
-    @Override
     public void makeNextPaymentFailWithError() {
         makeNextInvoiceFailWithError.set(true);
     }
 
-    @Override
     public void makeNextPaymentFailWithException() {
         makeNextInvoiceFailWithException.set(true);
     }
 
-    @Override
     public void makeAllInvoicesFailWithError(final boolean failure) {
         makeAllInvoicesFailWithError.set(failure);
+    }
+
+    public void updatePaymentTransactions(final UUID paymentId, final List<PaymentTransactionInfoPlugin> newTransactions) {
+        if (paymentTransactions.containsKey(paymentId.toString())) {
+            paymentTransactions.put (paymentId.toString(), newTransactions);
+        }
     }
 
     @Override
     public PaymentTransactionInfoPlugin authorizePayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context)
             throws PaymentPluginApiException {
-        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.AUTHORIZE, amount, currency);
+        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.AUTHORIZE, amount, currency, properties);
     }
 
     @Override
     public PaymentTransactionInfoPlugin capturePayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context)
             throws PaymentPluginApiException {
-        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.CAPTURE, amount, currency);
+        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.CAPTURE, amount, currency, properties);
     }
 
     @Override
     public PaymentTransactionInfoPlugin purchasePayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {
-        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.PURCHASE, amount, currency);
+        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.PURCHASE, amount, currency, properties);
     }
 
     @Override
     public PaymentTransactionInfoPlugin voidPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final Iterable<PluginProperty> properties, final CallContext context)
             throws PaymentPluginApiException {
-        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.VOID, BigDecimal.ZERO, null);
+        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.VOID, BigDecimal.ZERO, null, properties);
     }
 
     @Override
     public PaymentTransactionInfoPlugin creditPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context)
             throws PaymentPluginApiException {
-        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.CREDIT, amount, currency);
+        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.CREDIT, amount, currency, properties);
     }
 
     @Override
@@ -305,16 +313,16 @@ public class MockPaymentProviderPlugin implements NoOpPaymentPluginApi {
 
     @Override
     public HostedPaymentPageFormDescriptor buildFormDescriptor(final UUID kbAccountId, final Iterable<PluginProperty> customFields, final Iterable<PluginProperty> properties, final CallContext callContext) {
-        return null;
+        return new DefaultNoOpHostedPaymentPageFormDescriptor(kbAccountId);
     }
 
     @Override
     public GatewayNotification processNotification(final String notification, final Iterable<PluginProperty> properties, final CallContext callContext) throws PaymentPluginApiException {
-        return null;
+        return new DefaultNoOpGatewayNotification();
     }
 
     @Override
-    public PaymentTransactionInfoPlugin refundPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbPaymentMethodId, final UUID kbTransactionId, final BigDecimal refundAmount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {
+    public PaymentTransactionInfoPlugin refundPayment(final UUID kbAccountId, final UUID kbPaymentId, final UUID kbTransactionId, final UUID kbPaymentMethodId, final BigDecimal refundAmount, final Currency currency, final Iterable<PluginProperty> properties, final CallContext context) throws PaymentPluginApiException {
 
         final InternalPaymentInfo info = payments.get(kbPaymentId.toString());
         if (info == null) {
@@ -325,32 +333,54 @@ public class MockPaymentProviderPlugin implements NoOpPaymentPluginApi {
             throw new PaymentPluginApiException("", String.format("Refund amount of %s for payment id %s is bigger than the payment amount %s (plugin %s)",
                                                                   refundAmount, kbPaymentId.toString(), maxAmountRefundable, PLUGIN_NAME));
         }
-        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.REFUND, refundAmount, currency);
+        return getPaymentTransactionInfoPluginResult(kbPaymentId, kbTransactionId, TransactionType.REFUND, refundAmount, currency, properties);
     }
 
-    private PaymentTransactionInfoPlugin getPaymentTransactionInfoPluginResult(final UUID kbPaymentId, final UUID kbTransactionId, final TransactionType type, final BigDecimal amount, final Currency currency) throws PaymentPluginApiException {
-
+    private PaymentTransactionInfoPlugin getPaymentTransactionInfoPluginResult(final UUID kbPaymentId, final UUID kbTransactionId, final TransactionType type, final BigDecimal amount, final Currency currency, final Iterable<PluginProperty> pluginProperties) throws PaymentPluginApiException {
         if (makeNextInvoiceFailWithException.getAndSet(false)) {
             throw new PaymentPluginApiException("", "test error");
         }
 
-        final PaymentPluginStatus status = (makeAllInvoicesFailWithError.get() || makeNextInvoiceFailWithError.getAndSet(false)) ? PaymentPluginStatus.ERROR : PaymentPluginStatus.PROCESSED;
+        final PluginProperty paymentPluginStatusOverride = Iterables.tryFind(pluginProperties, new Predicate<PluginProperty>() {
+            @Override
+            public boolean apply(final PluginProperty input) {
+                return PLUGIN_PROPERTY_PAYMENT_PLUGIN_STATUS_OVERRIDE.equals(input.getKey());
+            }
+        }).orNull();
+
+        final PaymentPluginStatus status;
+        if (paymentPluginStatusOverride != null && paymentPluginStatusOverride.getValue() != null) {
+            status = PaymentPluginStatus.valueOf(paymentPluginStatusOverride.getValue().toString());
+        } else {
+            status = (makeAllInvoicesFailWithError.get() || makeNextInvoiceFailWithError.getAndSet(false)) ? PaymentPluginStatus.ERROR : PaymentPluginStatus.PROCESSED;
+        }
+        final String errorCode = status == PaymentPluginStatus.PROCESSED ? "" : GATEWAY_ERROR_CODE;
+        final String error = status == PaymentPluginStatus.PROCESSED ? "" : GATEWAY_ERROR;
 
         InternalPaymentInfo info = payments.get(kbPaymentId.toString());
         if (info == null) {
             info = new InternalPaymentInfo();
             payments.put(kbPaymentId.toString(), info);
         }
-        info.addAmount(type, amount);
 
-        final PaymentTransactionInfoPlugin result = new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, type, amount, currency, clock.getUTCNow(), clock.getUTCNow(), status, null);
+        final PaymentTransactionInfoPlugin result = new DefaultNoOpPaymentInfoPlugin(kbPaymentId, kbTransactionId, type, amount, currency, clock.getUTCNow(), clock.getUTCNow(), status, errorCode, error);
         List<PaymentTransactionInfoPlugin> existingTransactions = paymentTransactions.get(kbPaymentId.toString());
         if (existingTransactions == null) {
             existingTransactions = new ArrayList<PaymentTransactionInfoPlugin>();
             paymentTransactions.put(kbPaymentId.toString(), existingTransactions);
         }
 
+        final Iterator<PaymentTransactionInfoPlugin> iterator = existingTransactions.iterator();
+        while (iterator.hasNext()) {
+            final PaymentTransactionInfoPlugin existingTransaction = iterator.next();
+            if (existingTransaction.getKbTransactionPaymentId().equals(kbTransactionId)) {
+                info.addAmount(type, existingTransaction.getAmount().negate());
+                iterator.remove();
+            }
+        }
         existingTransactions.add(result);
+        info.addAmount(type, result.getAmount());
+
         return result;
     }
 }

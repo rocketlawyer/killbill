@@ -46,14 +46,11 @@ import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.entitlement.api.SubscriptionApiException;
 import org.killbill.billing.entity.EntityPersistenceException;
 import org.killbill.billing.events.EffectiveSubscriptionInternalEvent;
-import org.killbill.billing.events.RepairSubscriptionInternalEvent;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseTransitionType;
 import org.killbill.billing.subscription.api.migration.AccountMigrationData;
 import org.killbill.billing.subscription.api.migration.AccountMigrationData.BundleMigrationData;
 import org.killbill.billing.subscription.api.migration.AccountMigrationData.SubscriptionMigrationData;
-import org.killbill.billing.subscription.api.timeline.DefaultRepairSubscriptionEvent;
-import org.killbill.billing.subscription.api.timeline.SubscriptionDataRepair;
 import org.killbill.billing.subscription.api.transfer.TransferCancelData;
 import org.killbill.billing.subscription.api.user.DefaultEffectiveSubscriptionEvent;
 import org.killbill.billing.subscription.api.user.DefaultRequestedSubscriptionEvent;
@@ -68,9 +65,11 @@ import org.killbill.billing.subscription.engine.core.SubscriptionNotificationKey
 import org.killbill.billing.subscription.engine.dao.model.SubscriptionBundleModelDao;
 import org.killbill.billing.subscription.engine.dao.model.SubscriptionEventModelDao;
 import org.killbill.billing.subscription.engine.dao.model.SubscriptionModelDao;
+import org.killbill.billing.subscription.events.EventBaseBuilder;
 import org.killbill.billing.subscription.events.SubscriptionBaseEvent;
 import org.killbill.billing.subscription.events.SubscriptionBaseEvent.EventType;
 import org.killbill.billing.subscription.events.phase.PhaseEvent;
+import org.killbill.billing.subscription.events.phase.PhaseEventBuilder;
 import org.killbill.billing.subscription.events.user.ApiEvent;
 import org.killbill.billing.subscription.events.user.ApiEventBuilder;
 import org.killbill.billing.subscription.events.user.ApiEventCancel;
@@ -676,7 +675,7 @@ public class DefaultSubscriptionDao extends EntityDaoBase<SubscriptionBundleMode
             }
 
             if (cur.getEffectiveDate().compareTo(migrateBillingEvent.getEffectiveDate()) > 0) {
-                if (cur.getType() == EventType.API_USER && ((ApiEvent) cur).getEventType() == ApiEventType.CHANGE) {
+                if (cur.getType() == EventType.API_USER && ((ApiEvent) cur).getApiEventType() == ApiEventType.CHANGE) {
                     // This is an EOT change that is occurring after the MigrateBilling : returns same list
                     return changeEvents;
                 }
@@ -693,7 +692,7 @@ public class DefaultSubscriptionDao extends EntityDaoBase<SubscriptionBundleMode
             final DateTime now = clock.getUTCNow();
             final ApiEventBuilder builder = new ApiEventBuilder()
                     .setActive(true)
-                    .setEventType(ApiEventType.MIGRATE_BILLING)
+                    .setApiEventType(ApiEventType.MIGRATE_BILLING)
                     .setFromDisk(true)
                     .setTotalOrdering(migrateBillingEvent.getTotalOrdering())
                     .setUuid(UUIDs.randomUUID())
@@ -702,7 +701,6 @@ public class DefaultSubscriptionDao extends EntityDaoBase<SubscriptionBundleMode
                     .setUpdatedDate(now)
                     .setRequestedDate(migrateBillingEvent.getRequestedDate())
                     .setEffectiveDate(migrateBillingEvent.getEffectiveDate())
-                    .setProcessedDate(now)
                     .setActiveVersion(migrateBillingEvent.getCurrentVersion())
                     .setEventPlan(prevPlan)
                     .setEventPlanPhase(prevPhase)
@@ -908,7 +906,6 @@ public class DefaultSubscriptionDao extends EntityDaoBase<SubscriptionBundleMode
                         final SubscriptionBaseEvent addOnCancelEvent = new ApiEventCancel(new ApiEventBuilder()
                                                                                                   .setSubscriptionId(reloaded.getId())
                                                                                                   .setActiveVersion(((DefaultSubscriptionBase) reloaded).getActiveVersion())
-                                                                                                  .setProcessedDate(now)
                                                                                                   .setEffectiveDate(baseTriggerEventForAddOnCancellation.getEffectiveDate())
                                                                                                   .setRequestedDate(now)
                                                                                                   .setCreatedDate(baseTriggerEventForAddOnCancellation.getCreatedDate())
@@ -946,11 +943,19 @@ public class DefaultSubscriptionDao extends EntityDaoBase<SubscriptionBundleMode
                         it.remove();
                     }
                 }
-                // Set total ordering value of the fake dryRun event to make sure billing events are correctly ordererd
+                // Set total ordering value of the fake dryRun event to make sure billing events are correctly ordered
+                final SubscriptionBaseEvent curAdjustedDryRun;
                 if (!events.isEmpty()) {
-                    curDryRun.setTotalOrdering(events.get(events.size() - 1).getTotalOrdering() + 1);
+                    final EventBaseBuilder eventBuilder = (curDryRun.getType() == EventType.API_USER) ?
+                                                          new ApiEventBuilder((ApiEvent) curDryRun) :
+                                                          new PhaseEventBuilder((PhaseEvent) curDryRun);
+                    eventBuilder.setTotalOrdering(events.get(events.size() - 1).getTotalOrdering() + 1);
+
+                    curAdjustedDryRun = eventBuilder.build();
+                } else {
+                    curAdjustedDryRun = curDryRun;
                 }
-                events.add(curDryRun);
+                events.add(curAdjustedDryRun);
             }
         }
     }
@@ -965,44 +970,6 @@ public class DefaultSubscriptionDao extends EntityDaoBase<SubscriptionBundleMode
                 for (final BundleMigrationData curBundle : accountData.getData()) {
                     migrateBundleDataFromTransaction(curBundle, transactional, entitySqlDaoWrapperFactory, context);
                 }
-                return null;
-            }
-        });
-    }
-
-    @Override
-    public void repair(final UUID accountId, final UUID bundleId, final List<SubscriptionDataRepair> inRepair, final InternalCallContext context) {
-        transactionalSqlDao.execute(new EntitySqlDaoTransactionWrapper<Void>() {
-            @Override
-            public Void inTransaction(final EntitySqlDaoWrapperFactory entitySqlDaoWrapperFactory) throws Exception {
-                final SubscriptionSqlDao transactional = entitySqlDaoWrapperFactory.become(SubscriptionSqlDao.class);
-
-                final SubscriptionEventSqlDao transEventDao = entitySqlDaoWrapperFactory.become(SubscriptionEventSqlDao.class);
-                for (final SubscriptionDataRepair cur : inRepair) {
-                    transactional.updateForRepair(cur.getId().toString(), cur.getActiveVersion(), cur.getAlignStartDate().toDate(), cur.getBundleStartDate().toDate(), context);
-                    for (final SubscriptionBaseEvent event : cur.getInitialEvents()) {
-                        transEventDao.updateVersion(event.getId().toString(), event.getActiveVersion(), context);
-                    }
-                    for (final SubscriptionBaseEvent event : cur.getNewEvents()) {
-                        transEventDao.create(new SubscriptionEventModelDao(event), context);
-                        if (event.getEffectiveDate().isAfter(clock.getUTCNow())) {
-                            recordFutureNotificationFromTransaction(entitySqlDaoWrapperFactory,
-                                                                    event.getEffectiveDate(),
-                                                                    new SubscriptionNotificationKey(event.getId()),
-                                                                    context);
-                        }
-                    }
-                }
-
-                try {
-                    // Note: we don't send a requested change event here, but a repair event
-                    final RepairSubscriptionInternalEvent busEvent = new DefaultRepairSubscriptionEvent(accountId, bundleId, clock.getUTCNow(),
-                                                                                                        context.getAccountRecordId(), context.getTenantRecordId(), context.getUserToken());
-                    eventBus.postFromTransaction(busEvent, entitySqlDaoWrapperFactory.getHandle().getConnection());
-                } catch (EventBusException e) {
-                    log.warn("Failed to post repair subscription event for bundle " + bundleId, e);
-                }
-
                 return null;
             }
         });

@@ -24,6 +24,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -69,6 +70,7 @@ import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.entitlement.api.SubscriptionApiException;
 import org.killbill.billing.entitlement.api.SubscriptionEventType;
 import org.killbill.billing.invoice.api.DryRunArguments;
+import org.killbill.billing.invoice.api.DryRunType;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
 import org.killbill.billing.invoice.api.InvoiceItem;
@@ -109,10 +111,13 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.annotation.Timed;
 import com.google.common.base.Function;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Ordering;
 import com.google.inject.Inject;
 import com.wordnik.swagger.annotations.Api;
 import com.wordnik.swagger.annotations.ApiOperation;
@@ -135,6 +140,13 @@ public class InvoiceResource extends JaxRsResourceBase {
     private final InvoiceNotifier invoiceNotifier;
     private final TenantUserApi tenantApi;
     private final Locale defaultLocale;
+
+    private static final Ordering<InvoicePaymentJson> INVOICE_PAYMENT_ORDERING = Ordering.from(new Comparator<InvoicePaymentJson>() {
+        @Override
+        public int compare(final InvoicePaymentJson o1, final InvoicePaymentJson o2) {
+            return o1.getTransactions().get(0).getEffectiveDate().compareTo(o2.getTransactions().get(0).getEffectiveDate());
+        }
+    });
 
     @Inject
     public InvoiceResource(final AccountUserApi accountUserApi,
@@ -304,7 +316,6 @@ public class InvoiceResource extends JaxRsResourceBase {
         }
     }
 
-
     @Timed
     @POST
     @Path("/" + DRY_RUN)
@@ -322,14 +333,14 @@ public class InvoiceResource extends JaxRsResourceBase {
                                           @javax.ws.rs.core.Context final UriInfo uriInfo) throws AccountApiException, InvoiceApiException {
         final CallContext callContext = context.createContext(createdBy, reason, comment, request);
         final LocalDate inputDate;
-        // In the case of subscription dryRun we set the targetDate to be the effective date of the change itself
-        if (dryRunSubscriptionSpec != null && dryRunSubscriptionSpec.getEffectiveDate() != null) {
-            inputDate = dryRunSubscriptionSpec.getEffectiveDate();
-        // In case of Invoice dryRun we also allow the special value UPCOMING_INVOICE_TARGET_DATE where the system will automatically
-        // generate the resulting targetDate for upcoming invoice; in terms of invoice api that maps to passing a null targetDate
-        } else if (targetDate != null && targetDate.equals(UPCOMING_INVOICE_TARGET_DATE)) {
-            inputDate = null;
-        // Finally, in case of Invoice dryRun, we allow a null input date (will default to NOW), or extract the value provided
+        if (dryRunSubscriptionSpec != null) {
+            if (DryRunType.UPCOMING_INVOICE.name().equals(dryRunSubscriptionSpec.getDryRunType())) {
+                inputDate = null;
+            } else if (DryRunType.SUBSCRIPTION_ACTION.name().equals(dryRunSubscriptionSpec.getDryRunType()) && dryRunSubscriptionSpec.getEffectiveDate() != null) {
+                inputDate = dryRunSubscriptionSpec.getEffectiveDate();
+            } else {
+                inputDate = toLocalDate(UUID.fromString(accountId), targetDate, callContext);
+            }
         } else {
             inputDate = toLocalDate(UUID.fromString(accountId), targetDate, callContext);
         }
@@ -458,25 +469,12 @@ public class InvoiceResource extends JaxRsResourceBase {
         final CallContext callContext = context.createContext(createdBy, reason, comment, request);
 
         final Account account = accountUserApi.getAccountById(UUID.fromString(accountId), callContext);
-
-        // TODO Get rid of that check once we truly support multiple currencies per account
-        // See discussion https://github.com/killbill/killbill/commit/942e214d49e9c7ed89da76d972ee017d2d3ade58#commitcomment-6045547
-        final Set<Currency> currencies = new HashSet<Currency>(Lists.<InvoiceItemJson, Currency>transform(ImmutableList.<InvoiceItemJson>copyOf(externalChargesJson),
-                                                                                                          new Function<InvoiceItemJson, Currency>() {
-                                                                                                              @Override
-                                                                                                              public Currency apply(final InvoiceItemJson input) {
-                                                                                                                  return input.getCurrency();
-                                                                                                              }
-                                                                                                          }
-                                                                                                         ));
-        if (currencies.size() != 1 || !currencies.iterator().next().equals(account.getCurrency())) {
-            throw new InvoiceApiException(ErrorCode.CURRENCY_INVALID, currencies.iterator().next(), account.getCurrency());
-        }
+        final Iterable<InvoiceItemJson> sanitizedExternalChargesJson = cloneRefundItemsWithValidCurrency(account.getCurrency(), externalChargesJson);
 
         // Get the effective date of the external charge, in the account timezone
         final LocalDate requestedDate = toLocalDate(account, requestedDateTimeString, callContext);
 
-        final Iterable<InvoiceItem> externalCharges = Iterables.<InvoiceItemJson, InvoiceItem>transform(externalChargesJson,
+        final Iterable<InvoiceItem> externalCharges = Iterables.<InvoiceItemJson, InvoiceItem>transform(sanitizedExternalChargesJson,
                                                                                                         new Function<InvoiceItemJson, InvoiceItem>() {
                                                                                                             @Override
                                                                                                             public InvoiceItem apply(final InvoiceItemJson invoiceItemJson) {
@@ -492,7 +490,7 @@ public class InvoiceResource extends JaxRsResourceBase {
                 if (!paidInvoices.contains(externalCharge.getInvoiceId())) {
                     paidInvoices.add(externalCharge.getInvoiceId());
                     final Invoice invoice = invoiceApi.getInvoice(externalCharge.getInvoiceId(), callContext);
-                    createPurchaseForInvoice(account, invoice.getId(), invoice.getBalance(), false, pluginProperties, callContext);
+                    createPurchaseForInvoice(account, invoice.getId(), invoice.getBalance(), account.getPaymentMethodId(), false, pluginProperties, callContext);
                 }
             }
         }
@@ -508,6 +506,40 @@ public class InvoiceResource extends JaxRsResourceBase {
         return Response.status(Status.OK).entity(createdExternalChargesJson).build();
     }
 
+    private Iterable<InvoiceItemJson> cloneRefundItemsWithValidCurrency(final Currency accountCurrency, final Iterable<InvoiceItemJson> inputItems) throws InvoiceApiException {
+        try {
+            return Iterables.transform(inputItems, new Function<InvoiceItemJson, InvoiceItemJson>() {
+                @Override
+                public InvoiceItemJson apply(final InvoiceItemJson input) {
+                    if (input.getCurrency() != null) {
+                        if (!input.getCurrency().equals(accountCurrency)) {
+                            throw new IllegalArgumentException(input.getCurrency().toString());
+                        }
+                        return input;
+                    } else {
+                        return new InvoiceItemJson(null,
+                                                   input.getInvoiceId(),
+                                                   null, input.getAccountId(),
+                                                   input.getBundleId(),
+                                                   input.getSubscriptionId(),
+                                                   input.getPlanName(),
+                                                   input.getPhaseName(),
+                                                   input.getUsageName(),
+                                                   input.getItemType(),
+                                                   input.getDescription(),
+                                                   input.getStartDate(),
+                                                   input.getEndDate(),
+                                                   input.getAmount(),
+                                                   accountCurrency,
+                                                   null);
+                    }
+                }
+            });
+        } catch (IllegalArgumentException e) {
+            throw new InvoiceApiException(ErrorCode.CURRENCY_INVALID, accountCurrency, e.getMessage());
+        }
+    }
+
     @Timed
     @GET
     @Path("/{invoiceId:" + UUID_PATTERN + "}/" + PAYMENTS)
@@ -519,21 +551,33 @@ public class InvoiceResource extends JaxRsResourceBase {
                                 @QueryParam(QUERY_AUDIT) @DefaultValue("NONE") final AuditMode auditMode,
                                 @QueryParam(QUERY_WITH_PLUGIN_INFO) @DefaultValue("false") final Boolean withPluginInfo,
                                 @javax.ws.rs.core.Context final HttpServletRequest request) throws PaymentApiException, InvoiceApiException {
-        final TenantContext tenantContext = context.createContext(request);
 
+        final TenantContext tenantContext = context.createContext(request);
         final Invoice invoice = invoiceApi.getInvoice(UUID.fromString(invoiceId), tenantContext);
+
+        // Extract unique set of paymentId for this invoice
+        final Set<UUID> invoicePaymentIds = ImmutableSet.copyOf(Iterables.transform(invoice.getPayments(), new Function<InvoicePayment, UUID>() {
+            @Override
+            public UUID apply(final InvoicePayment input) {
+                return input.getPaymentId();
+            }
+        }));
+        if (invoicePaymentIds.isEmpty()) {
+            return Response.status(Status.OK).entity(ImmutableList.<InvoicePaymentJson>of()).build();
+        }
+
         final List<Payment> payments = new ArrayList<Payment>();
-        for (InvoicePayment cur : invoice.getPayments()) {
-            final Payment payment = paymentApi.getPayment(cur.getPaymentId(), withPluginInfo, ImmutableList.<PluginProperty>of(), tenantContext);
+        for (final UUID paymentId : invoicePaymentIds) {
+            final Payment payment = paymentApi.getPayment(paymentId, withPluginInfo, ImmutableList.<PluginProperty>of(), tenantContext);
             payments.add(payment);
         }
-        final List<InvoicePaymentJson> result = new ArrayList<InvoicePaymentJson>(payments.size());
-        if (payments.isEmpty()) {
-            return Response.status(Status.OK).entity(result).build();
-        }
-        for (final Payment cur : payments) {
-            result.add(new InvoicePaymentJson(cur, invoice.getId(), null));
-        }
+
+        final Iterable<InvoicePaymentJson> result = INVOICE_PAYMENT_ORDERING.sortedCopy(Iterables.transform(payments, new Function<Payment, InvoicePaymentJson>() {
+            @Override
+            public InvoicePaymentJson apply(final Payment input) {
+                return new InvoicePaymentJson(input, invoice.getId(), null);
+            }
+        }));
         return Response.status(Status.OK).entity(result).build();
     }
 
@@ -557,13 +601,17 @@ public class InvoiceResource extends JaxRsResourceBase {
         verifyNonNullOrEmpty(payment.getAccountId(), "InvoicePaymentJson accountId needs to be set",
                              payment.getTargetInvoiceId(), "InvoicePaymentJson targetInvoiceId needs to be set",
                              payment.getPurchasedAmount(), "InvoicePaymentJson purchasedAmount needs to be set");
+        Preconditions.checkArgument(!externalPayment || payment.getPaymentMethodId() == null, "InvoicePaymentJson should not contain a paymwentMethodId when this is an external payment");
 
         final Iterable<PluginProperty> pluginProperties = extractPluginProperties(pluginPropertiesString);
         final CallContext callContext = context.createContext(createdBy, reason, comment, request);
 
         final Account account = accountUserApi.getAccountById(UUID.fromString(payment.getAccountId()), callContext);
+        final UUID paymentMethodId = externalPayment ? null :
+                                     (payment.getPaymentMethodId() != null ? UUID.fromString(payment.getPaymentMethodId()) : account.getPaymentMethodId());
+
         final UUID invoiceId = UUID.fromString(payment.getTargetInvoiceId());
-        final Payment result = createPurchaseForInvoice(account, invoiceId, payment.getPurchasedAmount(), externalPayment, pluginProperties, callContext);
+        final Payment result = createPurchaseForInvoice(account, invoiceId, payment.getPurchasedAmount(), paymentMethodId, externalPayment, pluginProperties, callContext);
         // STEPH should that live in InvoicePayment instead?
         return uriBuilder.buildResponse(uriInfo, InvoicePaymentResource.class, "getInvoicePayment", result.getId());
     }
@@ -899,6 +947,7 @@ public class InvoiceResource extends JaxRsResourceBase {
 
     private static class DefaultDryRunArguments implements DryRunArguments {
 
+        private final DryRunType dryRunType;
         private final SubscriptionEventType action;
         private final UUID subscriptionId;
         private final DateTime effectiveDate;
@@ -909,6 +958,7 @@ public class InvoiceResource extends JaxRsResourceBase {
 
         public DefaultDryRunArguments(final InvoiceDryRunJson input, final DateTimeZone accountTimeZone, final Currency currency, final Clock clock) {
             if (input == null) {
+                this.dryRunType = DryRunType.TARGET_DATE;
                 this.action = null;
                 this.subscriptionId = null;
                 this.effectiveDate = null;
@@ -917,34 +967,40 @@ public class InvoiceResource extends JaxRsResourceBase {
                 this.billingPolicy = null;
                 this.overrides = null;
             } else {
+                this.dryRunType = input.getDryRunType() != null ? DryRunType.valueOf(input.getDryRunType()) : DryRunType.TARGET_DATE;
                 this.action = input.getDryRunAction() != null ? SubscriptionEventType.valueOf(input.getDryRunAction()) : null;
                 this.subscriptionId = input.getSubscriptionId() != null ? UUID.fromString(input.getSubscriptionId()) : null;
                 this.bundleId = input.getBundleId() != null ? UUID.fromString(input.getBundleId()) : null;
                 this.effectiveDate = input.getEffectiveDate() != null ? ClockUtil.computeDateTimeWithUTCReferenceTime(input.getEffectiveDate(), clock.getUTCNow().toLocalTime(), accountTimeZone, clock) : null;
                 this.billingPolicy = input.getBillingPolicy() != null ? BillingActionPolicy.valueOf(input.getBillingPolicy()) : null;
-                final PlanPhaseSpecifier planPhaseSpecifier  = (input.getProductName() != null &&
-                                     input.getProductCategory() != null &&
-                                     input.getBillingPeriod() != null) ?
-                                    new PlanPhaseSpecifier(input.getProductName(),
-                                                           ProductCategory.valueOf(input.getProductCategory()),
-                                                           BillingPeriod.valueOf(input.getBillingPeriod()),
-                                                           input.getPriceListName(),
-                                                           input.getPhaseType() != null ? PhaseType.valueOf(input.getPhaseType()) : null) :
-                                    null;
+                final PlanPhaseSpecifier planPhaseSpecifier = (input.getProductName() != null &&
+                                                               input.getProductCategory() != null &&
+                                                               input.getBillingPeriod() != null) ?
+                                                              new PlanPhaseSpecifier(input.getProductName(),
+                                                                                     ProductCategory.valueOf(input.getProductCategory()),
+                                                                                     BillingPeriod.valueOf(input.getBillingPeriod()),
+                                                                                     input.getPriceListName(),
+                                                                                     input.getPhaseType() != null ? PhaseType.valueOf(input.getPhaseType()) : null) :
+                                                              null;
                 this.specifier = planPhaseSpecifier;
                 this.overrides = input.getPriceOverrides() != null ?
                                  ImmutableList.copyOf(Iterables.transform(input.getPriceOverrides(), new Function<PhasePriceOverrideJson, PlanPhasePriceOverride>() {
-                    @Nullable
-                    @Override
-                    public PlanPhasePriceOverride apply(@Nullable final PhasePriceOverrideJson input) {
-                        if (input.getPhaseName() != null) {
-                            return new DefaultPlanPhasePriceOverride(input.getPhaseName(), currency, input.getFixedPrice(), input.getRecurringPrice());
-                        } else {
-                            return new DefaultPlanPhasePriceOverride(planPhaseSpecifier, currency, input.getFixedPrice(), input.getRecurringPrice());
-                        }
-                    }
-                })) : ImmutableList.<PlanPhasePriceOverride>of();
+                                     @Nullable
+                                     @Override
+                                     public PlanPhasePriceOverride apply(@Nullable final PhasePriceOverrideJson input) {
+                                         if (input.getPhaseName() != null) {
+                                             return new DefaultPlanPhasePriceOverride(input.getPhaseName(), currency, input.getFixedPrice(), input.getRecurringPrice());
+                                         } else {
+                                             return new DefaultPlanPhasePriceOverride(planPhaseSpecifier, currency, input.getFixedPrice(), input.getRecurringPrice());
+                                         }
+                                     }
+                                 })) : ImmutableList.<PlanPhasePriceOverride>of();
             }
+        }
+
+        @Override
+        public DryRunType getDryRunType() {
+            return dryRunType;
         }
 
         @Override
@@ -978,7 +1034,7 @@ public class InvoiceResource extends JaxRsResourceBase {
         }
 
         @Override
-        public List<PlanPhasePriceOverride> getPlanPhasePriceoverrides() {
+        public List<PlanPhasePriceOverride> getPlanPhasePriceOverrides() {
             return overrides;
         }
     }

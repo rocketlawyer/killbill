@@ -112,6 +112,7 @@ public class IncompletePaymentTransactionTask extends CompletionTaskBase<Payment
                                                                                                                   rehydratedPaymentTransaction.getCreatedDate(),
                                                                                                                   rehydratedPaymentTransaction.getCreatedDate(),
                                                                                                                   PaymentPluginStatus.UNDEFINED,
+                                                                                                                  null,
                                                                                                                   null);
                 PaymentTransactionInfoPlugin paymentTransactionInfoPlugin;
                 try {
@@ -142,7 +143,7 @@ public class IncompletePaymentTransactionTask extends CompletionTaskBase<Payment
         if (!TRANSACTION_STATUSES_TO_CONSIDER.contains(event.getStatus())) {
             return;
         }
-        insertNewNotificationForUnresolvedTransactionIfNeeded(event.getPaymentTransactionId(), 1, event.getUserToken(), event.getSearchKey1(), event.getSearchKey2());
+        insertNewNotificationForUnresolvedTransactionIfNeeded(event.getPaymentTransactionId(), 0, event.getUserToken(), event.getSearchKey1(), event.getSearchKey2());
     }
 
     public boolean updatePaymentAndTransactionIfNeededWithAccountLock(final PaymentModelDao payment, final PaymentTransactionModelDao paymentTransaction, final PaymentTransactionInfoPlugin paymentTransactionInfoPlugin, final InternalTenantContext internalTenantContext) {
@@ -186,13 +187,25 @@ public class IncompletePaymentTransactionTask extends CompletionTaskBase<Payment
                 newPaymentState = paymentStateMachineHelper.getFailureStateForTransaction(paymentTransaction.getTransactionType());
                 break;
             case PLUGIN_FAILURE:
+                newPaymentState = paymentStateMachineHelper.getErroredStateForTransaction(paymentTransaction.getTransactionType());
+                break;
             case UNKNOWN:
             default:
-                log.info("Janitor IncompletePaymentTransactionTask unable to repair payment {}, transaction {}: {} -> {}",
-                         payment.getId(), paymentTransaction.getId(), paymentTransaction.getTransactionStatus(), transactionStatus);
+                if (transactionStatus != paymentTransaction.getTransactionStatus()) {
+                    log.info("Janitor IncompletePaymentTransactionTask unable to repair payment {}, transaction {}: {} -> {}",
+                             payment.getId(), paymentTransaction.getId(), paymentTransaction.getTransactionStatus(), transactionStatus);
+                }
                 // We can't get anything interesting from the plugin...
                 insertNewNotificationForUnresolvedTransactionIfNeeded(paymentTransaction.getId(), attemptNumber, userToken, internalTenantContext.getAccountRecordId(), internalTenantContext.getTenantRecordId());
                 return false;
+        }
+
+        // Our status did not change, so we just insert a new notification (attemptNumber will be incremented)
+        if (transactionStatus == paymentTransaction.getTransactionStatus()) {
+            log.debug("Janitor IncompletePaymentTransactionTask repairing payment {}, transaction {}, transitioning transactionStatus from {} -> {}",
+                      payment.getId(), paymentTransaction.getId(), paymentTransaction.getTransactionStatus(), transactionStatus);
+            insertNewNotificationForUnresolvedTransactionIfNeeded(paymentTransaction.getId(), attemptNumber, userToken, internalTenantContext.getAccountRecordId(), internalTenantContext.getTenantRecordId());
+            return false;
         }
 
         // Recompute new lastSuccessPaymentState. This is important to be able to allow new operations on the state machine (for e.g an AUTH_SUCCESS would now allow a CAPTURE operation)
@@ -207,6 +220,7 @@ public class IncompletePaymentTransactionTask extends CompletionTaskBase<Payment
         // Update the gatewayErrorCode, gatewayError if we got a paymentTransactionInfoPlugin
         final String gatewayErrorCode = paymentTransactionInfoPlugin != null ? paymentTransactionInfoPlugin.getGatewayErrorCode() : paymentTransaction.getGatewayErrorCode();
         final String gatewayError = paymentTransactionInfoPlugin != null ? paymentTransactionInfoPlugin.getGatewayError() : paymentTransaction.getGatewayErrorMsg();
+
 
         log.info("Janitor IncompletePaymentTransactionTask repairing payment {}, transaction {}, transitioning transactionStatus from {} -> {}",
                  payment.getId(), paymentTransaction.getId(), paymentTransaction.getTransactionStatus(), transactionStatus);
@@ -238,10 +252,10 @@ public class IncompletePaymentTransactionTask extends CompletionTaskBase<Payment
     }
 
     @VisibleForTesting
-    DateTime getNextNotificationTime(@Nullable final Integer attemptNumber) {
+    DateTime getNextNotificationTime(final Integer attemptNumber) {
 
         final List<TimeSpan> retries = paymentConfig.getIncompleteTransactionsRetries();
-        if (attemptNumber == null || attemptNumber > retries.size()) {
+        if (attemptNumber > retries.size()) {
             return null;
         }
         final TimeSpan nextDelay = retries.get(attemptNumber - 1);
@@ -249,8 +263,15 @@ public class IncompletePaymentTransactionTask extends CompletionTaskBase<Payment
     }
 
     private void insertNewNotificationForUnresolvedTransactionIfNeeded(final UUID paymentTransactionId, @Nullable final Integer attemptNumber, @Nullable final UUID userToken, final Long accountRecordId, final Long tenantRecordId) {
-        final NotificationEvent key = new JanitorNotificationKey(paymentTransactionId, IncompletePaymentTransactionTask.class.toString(), attemptNumber);
-        final DateTime notificationTime = getNextNotificationTime(attemptNumber);
+        // When we come from a GET path, we don't want to insert a new notification
+        if (attemptNumber == null) {
+            return;
+        }
+
+        // Increment value before we insert
+        final Integer newAttemptNumber = attemptNumber.intValue() + 1;
+        final NotificationEvent key = new JanitorNotificationKey(paymentTransactionId, IncompletePaymentTransactionTask.class.toString(), newAttemptNumber);
+        final DateTime notificationTime = getNextNotificationTime(newAttemptNumber);
         // Will be null in the GET path or when we run out opf attempts..
         if (notificationTime != null) {
             try {
